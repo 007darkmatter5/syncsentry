@@ -38,16 +38,33 @@ public sealed class DemoRclone : IRcloneRc
 {
     private readonly object _gate = new();
     private readonly List<RcJob> _jobs = [];
+    private readonly List<RcFinished> _finished = [];
 
     public DemoRclone()
     {
         _jobs.Add(Sample(7, "syncsentry-demo"));
+        _finished.Add(new RcFinished(
+            "Movies/Already-There.mkv",
+            2_200_000_000,
+            DateTimeOffset.UtcNow.AddMinutes(-3),
+            true,
+            null,
+            "/mnt/remotes/UNASPRO_Media/Movies",
+            "/mnt/user/data/media/Movies"));
+        _finished.Add(new RcFinished(
+            "Movies/Skipped.mkv",
+            800_000_000,
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            false,
+            "connection reset",
+            "/mnt/remotes/UNASPRO_Media/Movies",
+            "/mnt/user/data/media/Movies"));
     }
 
     public Task<RcSnapshot> GetSnapshotAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
     {
         lock (_gate)
-            return Task.FromResult(new RcSnapshot(true, null, _jobs.ToArray(), _jobs[0].Stats));
+            return Task.FromResult(new RcSnapshot(true, null, _jobs.ToArray(), _jobs[0].Stats, RcAccess.Ok, _finished.ToArray()));
     }
 
     public Task<RcCallResult> StartAsync(string? url, string? user, string? password, RcStartRequest request, CancellationToken cancellationToken)
@@ -82,7 +99,11 @@ public sealed class DemoRclone : IRcloneRc
             500,
             0,
             null,
-            [new RcTransfer("movies/Example.mkv", 400_000_000, 1_200_000_000, 33, 12d * 1024 * 1024)]);
+            [
+                new RcTransfer("Movies/Example.mkv", 540_000_000, 1_200_000_000, 45, 18d * 1024 * 1024, "/mnt/remotes/UNASPRO_Media/Movies", "/mnt/user/data/media/Movies", 36),
+                new RcTransfer("Movies/Trailer.mkv", 80_000_000, 640_000_000, 12, 8d * 1024 * 1024, "/mnt/remotes/UNASPRO_Media/Movies", "/mnt/user/data/media/Movies", 70)
+            ],
+            480);
         return new RcJob(id, group, false, false, null, DateTimeOffset.UtcNow.AddMinutes(-8), stats);
     }
 }

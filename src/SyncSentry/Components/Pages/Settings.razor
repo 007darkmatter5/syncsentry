@@ -1,5 +1,6 @@
 @page "/settings"
 @inject SettingsStore Store
+@inject RunNowService RunNow
 @inject ISnackbar Snackbar
 @inject DemoInboxHolder DemoHolder
 
@@ -7,7 +8,17 @@
 
 <div class="kicker">Config</div>
 <MudText Typo="Typo.h4" GutterBottom="true">Settings</MudText>
-<MudText Typo="Typo.body2" Class="mb-4 muted">Passwords and the ntfy token are stored encrypted and are not shown again. Leave the password field blank to keep the saved one.</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Passwords and the ntfy token are stored encrypted and are not shown again. Leave a password box blank to keep the one already saved.</MudText>
+
+@if (GeneralDirty)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4 save-banner" Variant="Variant.Filled" NoIcon="false">
+        <div class="d-flex align-center justify-space-between flex-wrap gap-3">
+            <span>You have changes that are not saved yet.</span>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" OnClick="SaveGeneral">Save settings</MudButton>
+        </div>
+    </MudAlert>
+}
 
 @if (!string.IsNullOrEmpty(_notice))
 {
@@ -18,16 +29,18 @@
     <MudTabPanel Text="General">
         @if (_general is not null)
         {
+            <div @oninput="MarkDirty" @onchange="MarkDirty">
             <MudGrid>
                 <MudItem xs="12" md="6">
-                    <MudText Typo="Typo.subtitle1">rclone remote control</MudText>
-                    <MudTextField T="string" @bind-Value="_general.RcUrl" Label="RC URL" Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField T="string" @bind-Value="_general.RcUser" Label="RC user" Variant="Variant.Outlined" Class="mt-2" />
-                    <MudTextField T="string" @bind-Value="_general.NewRcPassword" Label="@(_general.HasRcPassword ? "New RC password (one is saved)" : "RC password")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
-                    <MudSwitch T="bool" @bind-Value="_general.ClearRcPassword" Color="Color.Warning">Remove saved RC password</MudSwitch>
+                    <MudText Typo="Typo.subtitle1">rclone status</MudText>
+                    <MudText Typo="Typo.caption" Class="muted">The address of rclone on this Unraid server. Live copies are read from it.</MudText>
+                    <MudTextField T="string" @bind-Value="_general.RcUrl" Label="Status address" HelperText="For example http://192.168.1.10:5572. Do not put a password in the address." Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.RcUser" Label="Username" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.NewRcPassword" Label="@(_general.HasRcPassword ? "New password (one is already saved)" : "Password")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_general.ClearRcPassword" Color="Color.Warning">Remove saved password</MudSwitch>
                 </MudItem>
                 <MudItem xs="12" md="6">
-                    <MudText Typo="Typo.subtitle1">ntfy</MudText>
+                    <MudText Typo="Typo.subtitle1">Phone alerts (ntfy)</MudText>
                     <MudTextField T="string" @bind-Value="_general.NtfyServerUrl" Label="Server URL" Variant="Variant.Outlined" Class="mt-2" />
                     <MudTextField T="string" @bind-Value="_general.NtfyTopic" Label="Topic" Variant="Variant.Outlined" Class="mt-2" />
                     <MudTextField T="string" @bind-Value="_general.NewNtfyToken" Label="@(_general.HasNtfyToken ? "New access token (one is saved)" : "Access token")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
@@ -46,7 +59,7 @@
                     <MudSwitch T="bool" @bind-Value="_general.AlertJobCompleted" Color="Color.Primary">Job completed</MudSwitch>
                     <MudSwitch T="bool" @bind-Value="_general.AlertMountUnresponsive" Color="Color.Primary">Mount unresponsive</MudSwitch>
                     <MudSwitch T="bool" @bind-Value="_general.AlertMountUnmounted" Color="Color.Primary">Mount unmounted</MudSwitch>
-                    <MudSwitch T="bool" @bind-Value="_general.AlertAcceptRoutesOff" Color="Color.Primary">Accept-routes off</MudSwitch>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertAcceptRoutesOff" Color="Color.Primary">Tailscale routes turned off</MudSwitch>
                 </MudItem>
                 <MudItem xs="12" md="6">
                     <MudText Typo="Typo.subtitle1">Tailscale and timing</MudText>
@@ -61,7 +74,8 @@
                     <MudNumericField T="int" @bind-Value="_general.ScanMaxFiles" Label="Scan file cap" Variant="Variant.Outlined" Class="mt-2" Min="1000" Max="500000" />
                 </MudItem>
             </MudGrid>
-            <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveGeneral">Save general</MudButton>
+            <MudButton Class="mt-4" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" OnClick="SaveGeneral">Save settings</MudButton>
+            </div>
             <MudText Typo="Typo.subtitle1" Class="mt-6">Recent alerts</MudText>
             <MudTable Items="_alerts" Dense="true" Hover="true" Elevation="0">
                 <HeaderContent>
@@ -104,9 +118,15 @@
         <MudButton Class="mt-2" OnClick="AddLog">Add log</MudButton>
         <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveLogs">Save logs</MudButton>
     </MudTabPanel>
-    <MudTabPanel Text="Jobs">
-        <MudSelect T="string" Label="Job" Value="_jobKey" ValueChanged="SelectJob" Variant="Variant.Outlined" Class="mb-3">
-            <MudSelectItem T="string" Value="@("new")">New job</MudSelectItem>
+    <MudTabPanel Text="Advanced">
+        <MudExpansionPanels Class="mb-4">
+            <MudExpansionPanel Text="Saved copy tasks" MaxHeight="4000">
+                <MudText Typo="Typo.body2" Class="mb-3">These are copies you set up ahead of time. SyncSentry does not invent a copy. Press Run to ask rclone, or the script on the Unraid server, to start that one copy. It will not start a second copy of something already running.</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_job is null || _job.Id == Guid.Empty)" OnClick="RunSaved">Run this copy now</MudButton>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+        <MudSelect T="string" Label="Saved copy" Value="_jobKey" ValueChanged="SelectJob" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@("new")">New saved copy</MudSelectItem>
             @foreach (var job in _jobs)
             {
                 <MudSelectItem T="string" Value="@job.Id.ToString()">@job.Name</MudSelectItem>
@@ -116,9 +136,9 @@
         {
             <MudTextField T="string" @bind-Value="_job.Name" Label="Name" Variant="Variant.Outlined" Class="mb-2" />
             <MudSwitch T="bool" @bind-Value="_job.Enabled" Color="Color.Primary">Enabled</MudSwitch>
-            <MudSelect T="string" @bind-Value="_job.StartMode" Label="Start" Variant="Variant.Outlined" Class="mt-2">
-                <MudSelectItem T="string" Value="@("trigger")">Host trigger</MudSelectItem>
-                <MudSelectItem T="string" Value="@("rc")">rclone remote control</MudSelectItem>
+            <MudSelect T="string" @bind-Value="_job.StartMode" Label="How it starts" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem T="string" Value="@("trigger")">Ask the Unraid script</MudSelectItem>
+                <MudSelectItem T="string" Value="@("rc")">Ask rclone directly</MudSelectItem>
             </MudSelect>
             <MudSelect T="string" @bind-Value="_job.Operation" Label="Operation" Variant="Variant.Outlined" Class="mt-2">
                 <MudSelectItem T="string" Value="@("copy")">copy</MudSelectItem>
@@ -128,7 +148,7 @@
             <MudTextField T="string" @bind-Value="_job.Destination" Label="Destination" Variant="Variant.Outlined" Class="mt-2" />
             @if (_job.StartMode == "trigger")
             {
-                <MudTextField T="string" @bind-Value="_job.ScriptKey" Label="Allowlisted script key" Variant="Variant.Outlined" Class="mt-2" HelperText="The host script runs only jobs/&lt;key&gt;.sh. SyncSentry does not run a shell." />
+                <MudTextField T="string" @bind-Value="_job.ScriptKey" Label="Script name" Variant="Variant.Outlined" Class="mt-2" HelperText="The Unraid script runs only the file with this name in its scripts folder. SyncSentry does not run a shell command." />
             }
             else
             {
@@ -143,7 +163,7 @@
                 }
             </MudSelect>
             <div class="mt-3">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveJob">Save job</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" OnClick="SaveJob">Save this copy</MudButton>
                 @if (_job.Id != Guid.Empty)
                 {
                     <MudButton Color="Color.Error" OnClick="DeleteJob">Delete</MudButton>
@@ -193,6 +213,12 @@
     private string _pairKey = "new";
     private string? _notice;
     private bool _good;
+    private string _generalBaseline = "";
+
+    private bool _touched;
+    private bool GeneralDirty => _touched || (_general is not null && System.Text.Json.JsonSerializer.Serialize(_general) != _generalBaseline);
+
+    private void MarkDirty() => _touched = true;
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -208,6 +234,13 @@
         _jobKey = _job.Id == Guid.Empty ? "new" : _job.Id.ToString();
         _pair = _outbox.FirstOrDefault() ?? NewPair();
         _pairKey = _pair.Id == 0 ? "new" : _pair.Id.ToString();
+        RememberGeneral();
+    }
+
+    private void RememberGeneral()
+    {
+        _touched = false;
+        _generalBaseline = _general is null ? "" : System.Text.Json.JsonSerializer.Serialize(_general);
     }
 
     private async Task SaveGeneral()
@@ -217,6 +250,15 @@
         await Finish(await Store.SaveGeneralAsync(_general));
         _general = await Store.LoadGeneralAsync();
         _alerts = (await Store.RecentAlertsAsync()).ToList();
+        RememberGeneral();
+    }
+
+    private async Task RunSaved()
+    {
+        if (_job is null || _job.Id == Guid.Empty)
+            return;
+        var result = await RunNow.StartAsync(_job.Id, CancellationToken.None);
+        Note(result.Message, result.Ok);
     }
 
     private async Task TestNtfy()

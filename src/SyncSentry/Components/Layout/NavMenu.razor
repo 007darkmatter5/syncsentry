@@ -3,11 +3,12 @@
 <MudNavMenu>
     <AuthorizeView>
         <Authorized>
-            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Mounts</MudNavLink>
-            <MudNavLink Href="jobs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Sync">Jobs</MudNavLink>
-            <MudNavLink Href="outbox" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Outbox">Outbox</MudNavLink>
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.SyncAlt">Live copies</MudNavLink>
+            <MudNavLink Href="mounts" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Dns">Mounts</MudNavLink>
+            <MudNavLink Href="history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">History</MudNavLink>
             <MudNavLink Href="logs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Article">Logs</MudNavLink>
             <MudNavLink Href="settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+            <MudDivider Class="my-2" />
             <MudNavLink Href="account/password" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Lock">Password</MudNavLink>
             <MudDivider Class="my-2" />
             <MudText Typo="Typo.caption" Class="px-4 pb-2 d-block">@context.User.Identity?.Name</MudText>

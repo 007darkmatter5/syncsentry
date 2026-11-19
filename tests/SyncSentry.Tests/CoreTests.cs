@@ -133,6 +133,63 @@ public class OutboxTests
     }
 }
 
+public class LiveCopyTests
+{
+    [Fact]
+    public void Stats_keep_the_paths_rclone_reports_for_each_file()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+              "bytes": 620000000,
+              "totalBytes": 1840000000,
+              "transfers": 2,
+              "totalTransfers": 40,
+              "speed": 26000000,
+              "eta": 40,
+              "errors": 0,
+              "elapsedTime": 90.5,
+              "transferring": [
+                {"name":"Movies/Example.mkv","bytes":540000000,"size":1200000000,"percentage":45,"speed":18000000,"eta":36,"srcFs":"/mnt/remotes/UNASPRO_Media/Movies","dstFs":"/mnt/user/data/media/Movies"}
+              ]
+            }
+            """);
+        var stats = RcJson.ParseStats(doc.RootElement);
+        var file = Assert.Single(stats.Transferring);
+        Assert.Equal("/mnt/remotes/UNASPRO_Media/Movies", file.Source);
+        Assert.Equal("/mnt/user/data/media/Movies", file.Destination);
+        Assert.Equal(45, file.Percentage);
+        Assert.Equal(36, file.EtaSeconds);
+        Assert.Equal(90.5, stats.ElapsedSeconds);
+    }
+
+    [Fact]
+    public void Finished_files_keep_the_newest_fifty()
+    {
+        using var doc = JsonDocument.Parse("""
+            {"transferred":[
+              {"name":"Movies/Ok.mkv","size":10,"completedAt":"2026-11-19T18:00:00Z","srcFs":"/mnt/remotes/UNASPRO_Media/Movies","dstFs":"/mnt/user/data/media/Movies"},
+              {"name":"Movies/Bad.mkv","size":11,"timestamp":"2026-11-19T18:05:00Z","error":"reset","srcFs":"/a","dstFs":"/b"}
+            ]}
+            """);
+        var finished = RcJson.ParseFinished(doc.RootElement);
+        Assert.Equal("Movies/Bad.mkv", finished[0].Name);
+        Assert.False(finished[0].Ok);
+        Assert.True(finished[1].Ok);
+    }
+
+    [Fact]
+    public void Mount_labels_use_plain_names()
+    {
+        var mounts = new MountView[]
+        {
+            new("UNASPRO Media", "/mnt/remotes/UNASPRO_Media", "mounted", "cifs", "", null, null, null, null, true),
+            new("User shares", "/mnt/user", "mounted", "fuse.mergerfs", "", null, null, null, null, true)
+        };
+        Assert.Equal("UNASPRO_Media (remote SMB)", MountLabels.Label("/mnt/remotes/UNASPRO_Media/Movies/Example.mkv", mounts));
+        Assert.Equal("Unraid array (user share)", MountLabels.Label("/mnt/user/data/media/Movies/Example.mkv", mounts));
+    }
+}
+
 public class AlertTests
 {
     [Fact]

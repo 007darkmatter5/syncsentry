@@ -8,8 +8,8 @@ It does not mount or unmount anything, and it does not write to media. mergerfs 
 
 ## What you see
 
+- **Live copies.** The home page. Each running rclone copy shows the source folder, the destination folder, speed, progress, and ETA. Under that, every file moving right now has its own row. Recently finished files are listed underneath. If rclone's status page does not answer, the page says so and falls back to the log.
 - **Mounts.** mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
-- **Jobs.** Bytes, files, speed, ETA, and errors. The preferred source is rclone's remote-control API. If a job was started by a plain `rclone copy --log-file` script, SyncSentry parses the INFO log and its one-line `--stats` lines instead.
 - **Outbox.** For a source and a destination you configure, files that are missing, a different size, or newer on the source. Results are cached. A scan stops at a file cap and a time cap.
 - **Logs.** Tail, search, and level filter for the log files you configure.
 - **Run now.** Starts one saved job. It will not start a second copy of a job that is already running.
@@ -168,13 +168,13 @@ SyncSentry__Demo=true ASPNETCORE_ENVIRONMENT=Development \
 
 These are the demo fixtures, including a CIFS mount that is pretending to be frozen.
 
+![Live copies](docs/images/screenshots/live.png)
+
 ![Mounts](docs/images/screenshots/mounts.png)
 
-![Jobs](docs/images/screenshots/jobs.png)
+![History](docs/images/screenshots/history.png)
 
-![Outbox](docs/images/screenshots/outbox.png)
-
-![Logs](docs/images/screenshots/logs.png)
+![Settings](docs/images/screenshots/settings.png)
 
 ## License
 

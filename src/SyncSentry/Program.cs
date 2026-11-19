@@ -96,6 +96,7 @@ builder.Services.AddSingleton<INtfyClient, NtfyClient>();
 builder.Services.AddSingleton<AlertDispatcher>();
 builder.Services.AddSingleton(new DemoInboxHolder(AppFlags.Demo(builder.Configuration)));
 builder.Services.AddSingleton<LiveBoard>();
+builder.Services.AddSingleton<LiveCopyBoard>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<RunNowService>();
 builder.Services.AddSingleton<OutboxService>();
@@ -115,6 +116,7 @@ else
 
 builder.Services.AddScoped<MonitorTick>();
 builder.Services.AddHostedService<MonitorService>();
+builder.Services.AddHostedService<LiveCopyPoller>();
 builder.Services.AddHostedService<OutboxWorker>();
 builder.Services.AddScoped<AdminAccountService>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");

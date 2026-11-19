@@ -1,3 +1,4 @@
+@page "/history"
 @page "/outbox"
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject SettingsStore Store
@@ -5,11 +6,11 @@
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Outbox · SyncSentry</PageTitle>
+<PageTitle>History · SyncSentry</PageTitle>
 
-<div class="kicker">Waiting</div>
-<MudText Typo="Typo.h4" GutterBottom="true">Outbox</MudText>
-<MudText Typo="Typo.body2" Class="mb-4 muted">Files on the source that are missing, a different size, or newer than the destination. Results are cached. A scan that hits a frozen mount is abandoned.</MudText>
+<div class="kicker">Waiting and finished</div>
+<MudText Typo="Typo.h4" GutterBottom="true">History</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Files still waiting to be copied, and copies that already finished. A scan that hits a frozen mount is abandoned instead of hanging this page.</MudText>
 
 @foreach (var pair in _pairs)
 {

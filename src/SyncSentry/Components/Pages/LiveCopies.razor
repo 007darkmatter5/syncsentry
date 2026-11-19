@@ -1,0 +1,181 @@
+@page "/"
+@inject LiveCopyBoard Copies
+@implements IDisposable
+
+<PageTitle>Live copies · SyncSentry</PageTitle>
+
+<div class="kicker">Right now</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Live copies</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Each file rclone is moving, where it is coming from, and where it is going.</MudText>
+
+@{
+    var live = Copies.Current;
+    var problem = live.Access != RcAccess.Ok;
+}
+
+@if (problem)
+{
+    <MudAlert Severity="@(live.Access == RcAccess.Unauthorized ? Severity.Error : Severity.Warning)" Class="mb-4" Variant="Variant.Outlined">
+        @ProblemText(live)
+        <MudLink Href="settings" Class="ml-2">Open settings</MudLink>
+    </MudAlert>
+}
+
+@if (live.Copies.Count == 0)
+{
+    <MudPaper Class="pa-6 mb-4" Elevation="0" Outlined="true">
+        <MudText Typo="Typo.h6">No copy running right now</MudText>
+        <MudText Typo="Typo.body2" Class="muted">
+            @if (live.LastActivityUtc is null)
+            {
+                <span>Nothing has been copied since this page started watching.</span>
+            }
+            else
+            {
+                <span>Last activity @live.LastActivityUtc.Value.ToLocalTime().ToString("g").</span>
+            }
+        </MudText>
+    </MudPaper>
+}
+else
+{
+    @foreach (var copy in live.Copies)
+    {
+        <MudPaper Class="pa-4 mb-4 copy-card" Elevation="0" Outlined="true">
+            @if (copy.FromLog)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="mb-2">From the log file</MudChip>
+            }
+            <div class="copy-route">
+                <MudTooltip Text="@Tip(copy.SourcePath)">
+                    <span class="copy-place">@copy.SourceLabel</span>
+                </MudTooltip>
+                <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="mx-2" />
+                <MudTooltip Text="@Tip(copy.DestinationPath)">
+                    <span class="copy-place">@copy.DestinationLabel</span>
+                </MudTooltip>
+            </div>
+            <div class="path muted mb-2">@ShowPath(copy.SourcePath) → @ShowPath(copy.DestinationPath)</div>
+            <MudProgressLinear Class="my-2" Rounded="true" Color="Color.Primary" Value="@TextFormat.Percent(copy.Bytes, copy.TotalBytes)" />
+            <MudText Typo="Typo.body2">
+                @TextFormat.Bytes(copy.Bytes) / @TextFormat.Bytes(copy.TotalBytes)
+                · @TextFormat.Percent(copy.Bytes, copy.TotalBytes)%
+                · @TextFormat.Speed(copy.Speed)
+                · ETA @TextFormat.Eta(copy.EtaSeconds)
+                · @copy.FilesDone / @copy.FilesTotal files
+                · @copy.Errors errors
+                · elapsed @TextFormat.Eta(copy.ElapsedSeconds is null ? null : (int)copy.ElapsedSeconds)
+            </MudText>
+            @if (!string.IsNullOrWhiteSpace(copy.Note))
+            {
+                <MudText Typo="Typo.caption" Class="d-block mt-1 muted">@copy.Note</MudText>
+            }
+        </MudPaper>
+    }
+}
+
+<MudText Typo="Typo.h6" Class="mb-2">Files copying now</MudText>
+@if (live.Files.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="mb-4 muted">No individual file is transferring this moment.</MudText>
+}
+else
+{
+    <MudTable Items="live.Files" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0" Class="mb-6">
+        <HeaderContent>
+            <MudTh>File</MudTh>
+            <MudTh>From</MudTh>
+            <MudTh>To</MudTh>
+            <MudTh>Progress</MudTh>
+            <MudTh>Speed</MudTh>
+            <MudTh>ETA</MudTh>
+        </HeaderContent>
+        <RowTemplate Context="file">
+            <MudTd DataLabel="File"><span class="path">@file.Name</span></MudTd>
+            <MudTd DataLabel="From">
+                <MudTooltip Text="@Tip(file.SourcePath)"><span>@file.SourceLabel</span></MudTooltip>
+            </MudTd>
+            <MudTd DataLabel="To">
+                <MudTooltip Text="@Tip(file.DestinationPath)"><span>@file.DestinationLabel</span></MudTooltip>
+            </MudTd>
+            <MudTd DataLabel="Progress" Style="min-width: 10rem">
+                <MudProgressLinear Rounded="true" Color="Color.Primary" Value="@file.Percent" />
+                <span class="muted">@file.Percent% · @TextFormat.Bytes(file.Bytes) / @TextFormat.Bytes(file.Size)</span>
+            </MudTd>
+            <MudTd DataLabel="Speed">@TextFormat.Speed(file.Speed)</MudTd>
+            <MudTd DataLabel="ETA">@TextFormat.Eta(file.EtaSeconds)</MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+<MudText Typo="Typo.h6" Class="mb-2">Recently finished</MudText>
+@if (live.Finished.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="muted">Finished files show up here after rclone reports them.</MudText>
+}
+else
+{
+    <MudTable Items="live.Finished" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+        <HeaderContent>
+            <MudTh>File</MudTh>
+            <MudTh>Size</MudTh>
+            <MudTh>When</MudTh>
+            <MudTh>Result</MudTh>
+        </HeaderContent>
+        <RowTemplate Context="file">
+            <MudTd DataLabel="File">
+                <span class="path">@file.Name</span>
+                <div class="muted">@file.SourceLabel → @file.DestinationLabel</div>
+            </MudTd>
+            <MudTd DataLabel="Size">@TextFormat.Bytes(file.Size)</MudTd>
+            <MudTd DataLabel="When">@(file.CompletedAt?.ToLocalTime().ToString("g") ?? "—")</MudTd>
+            <MudTd DataLabel="Result">
+                @if (file.Ok)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Copied</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Failed</MudChip>
+                    <div class="muted">@file.Error</div>
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+}
+
+@code {
+    private PeriodicTimer? _timer;
+
+    protected override void OnInitialized()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private static string ProblemText(LiveCopySnapshot live) => live.Access switch
+    {
+        RcAccess.Unauthorized => "rclone refused the username or password.",
+        RcAccess.Unreachable => "rclone did not answer. Check that it is running and that the status address is one this container can reach.",
+        RcAccess.NotConfigured => "rclone's status address is not set.",
+        _ => live.Message ?? "rclone's status page could not be read."
+    };
+
+    private static string Tip(string? path) => string.IsNullOrWhiteSpace(path) ? "Path not reported" : path;
+
+    private static string ShowPath(string? path) => string.IsNullOrWhiteSpace(path) ? "path not reported" : path;
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -6,11 +6,11 @@
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Jobs · SyncSentry</PageTitle>
+<PageTitle>Saved copies · SyncSentry</PageTitle>
 
-<div class="kicker">rclone</div>
-<MudText Typo="Typo.h4" GutterBottom="true">Jobs</MudText>
-<MudText Typo="Typo.body2" Class="mb-4 muted">Running transfers come from rclone remote control when it answers, and from log files when a job was started outside it. Run now only starts a saved definition.</MudText>
+<div class="kicker">Advanced</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Saved copy tasks</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">These are copies you set up ahead of time. Live progress is on the first page. Run now starts one saved copy and will not start it twice.</MudText>
 
 @if (!string.IsNullOrEmpty(_message))
 {

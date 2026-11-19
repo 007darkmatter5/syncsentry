@@ -20,6 +20,26 @@ html, body {
     color: var(--mud-palette-secondary);
 }
 
+.copy-route {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .25rem;
+    font-size: 1.15rem;
+    font-weight: 650;
+}
+
+.copy-place {
+    border-bottom: 1px dashed var(--mud-palette-text-secondary);
+    cursor: help;
+}
+
+.save-banner {
+    position: sticky;
+    top: 4.5rem;
+    z-index: 5;
+}
+
 .mount-card {
     height: 100%;
     border: 1px solid var(--mud-palette-lines-default);
