@@ -12,7 +12,8 @@ public sealed record MountView(
     long? Used,
     long? Free,
     string? Detail,
-    bool Configured);
+    bool Configured,
+    int? ResponseMilliseconds = null);
 
 public sealed record JobView(
     long? RunId,

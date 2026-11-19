@@ -23,7 +23,33 @@ public sealed class InstanceSetting
     public string TailscaleStatusPath { get; set; } = "/config/host/tailscale.json";
     public string TailscaleSocketPath { get; set; } = "";
     public string TriggerDirectory { get; set; } = "/config/triggers";
+    public int HistoryDays { get; set; } = 30;
+    public string BandwidthMode { get; set; } = "off";
+    public double BandwidthMegabytes { get; set; } = 1;
+    public int ScheduleStartHour { get; set; } = 7;
+    public int ScheduleEndHour { get; set; } = 23;
+    public double ScheduleMegabytes { get; set; } = 1;
     public DateTimeOffset UpdatedUtc { get; set; }
+}
+
+public sealed class TransferEvent
+{
+    public long Id { get; set; }
+    public string DedupeKey { get; set; } = "";
+    public string Name { get; set; } = "";
+    public long Size { get; set; }
+    public DateTimeOffset CompletedUtc { get; set; }
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public string SourcePath { get; set; } = "";
+    public string DestinationPath { get; set; } = "";
+}
+
+public sealed class UserPreference
+{
+    public int Id { get; set; }
+    public string UserId { get; set; } = "";
+    public bool DarkMode { get; set; }
 }
 
 public sealed class WatchedMount

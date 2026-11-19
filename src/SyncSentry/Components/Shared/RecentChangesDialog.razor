@@ -1,0 +1,47 @@
+@inject TransferLog Log
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Recent changes</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_rows.Count == 0)
+        {
+            <MudText>No finished copies have been recorded yet.</MudText>
+        }
+        else
+        {
+            <MudTable Items="_rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>When</MudTh>
+                    <MudTh>File</MudTh>
+                    <MudTh>From</MudTh>
+                    <MudTh>To</MudTh>
+                    <MudTh>Size</MudTh>
+                    <MudTh>Result</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.CompletedUtc.ToLocalTime().ToString("g")</MudTd>
+                    <MudTd><span class="path">@context.Name</span></MudTd>
+                    <MudTd><span class="path">@context.SourcePath</span></MudTd>
+                    <MudTd><span class="path">@context.DestinationPath</span></MudTd>
+                    <MudTd>@TextFormat.Bytes(context.Size)</MudTd>
+                    <MudTd>@(context.Ok ? "Copied" : context.Error ?? "Failed")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private IReadOnlyList<HistoryRow> _rows = [];
+
+    protected override async Task OnInitializedAsync()
+        => _rows = await Log.RecentAsync(false, 200);
+
+    private void Close() => MudDialog.Close();
+}

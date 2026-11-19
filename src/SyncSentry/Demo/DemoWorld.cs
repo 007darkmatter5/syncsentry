@@ -22,21 +22,22 @@ public sealed class DemoProbe : IPathProbe
     {
         var full = MountInfo.Normalize(path);
         if (full.EndsWith("UNASPRO_Media", StringComparison.Ordinal))
-            return Task.FromResult(ProbeResult.Unresponsive("timed out"));
+            return Task.FromResult(ProbeResult.Unresponsive("timed out") with { ResponseMilliseconds = 3000 });
         if (full == "/mnt/user")
         {
             const long tebibyte = 1024L * 1024 * 1024 * 1024;
-            return Task.FromResult(ProbeResult.Mounted(20 * tebibyte, 8 * tebibyte, 12 * tebibyte));
+            return Task.FromResult(ProbeResult.Mounted(20 * tebibyte, 8 * tebibyte, 12 * tebibyte) with { ResponseMilliseconds = 4 });
         }
 
         const long gibibyte = 1024L * 1024 * 1024;
-        return Task.FromResult(ProbeResult.Mounted(10 * 1024 * gibibyte, 4 * 1024 * gibibyte, 6 * 1024 * gibibyte));
+        return Task.FromResult(ProbeResult.Mounted(10 * 1024 * gibibyte, 4 * 1024 * gibibyte, 6 * 1024 * gibibyte) with { ResponseMilliseconds = 12 });
     }
 }
 
 public sealed class DemoRclone : IRcloneRc
 {
     private readonly object _gate = new();
+    private string _limit = "off";
     private readonly List<RcJob> _jobs = [];
     private readonly List<RcFinished> _finished = [];
 
@@ -46,7 +47,7 @@ public sealed class DemoRclone : IRcloneRc
         _finished.Add(new RcFinished(
             "Movies/Already-There.mkv",
             2_200_000_000,
-            DateTimeOffset.UtcNow.AddMinutes(-3),
+            DateTimeOffset.Parse("2026-11-19T21:40:00Z"),
             true,
             null,
             "/mnt/remotes/UNASPRO_Media/Movies",
@@ -54,7 +55,7 @@ public sealed class DemoRclone : IRcloneRc
         _finished.Add(new RcFinished(
             "Movies/Skipped.mkv",
             800_000_000,
-            DateTimeOffset.UtcNow.AddMinutes(-1),
+            DateTimeOffset.Parse("2026-11-19T21:50:00Z"),
             false,
             "connection reset",
             "/mnt/remotes/UNASPRO_Media/Movies",
@@ -78,6 +79,29 @@ public sealed class DemoRclone : IRcloneRc
             return Task.FromResult(new RcCallResult(true, false, id, null));
         }
     }
+
+    public Task<BandwidthReading> GetBandwidthAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+            return Task.FromResult(Reading(_limit));
+    }
+
+    public Task<BandwidthReading> SetBandwidthAsync(string? url, string? user, string? password, string rate, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            _limit = string.IsNullOrWhiteSpace(rate) ? "off" : rate;
+            return Task.FromResult(Reading(_limit));
+        }
+    }
+
+    public Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+        => Task.FromResult<string?>("v1.76.0");
+
+    private static BandwidthReading Reading(string rate)
+        => rate.Equals("off", StringComparison.OrdinalIgnoreCase)
+            ? new BandwidthReading("off", -1, true)
+            : new BandwidthReading(rate, 1_048_576, true);
 
     public Task<RemoteListResult> ListRemoteAsync(string? url, string? user, string? password, string remote, int maxFiles, CancellationToken cancellationToken)
     {

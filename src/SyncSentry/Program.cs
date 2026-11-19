@@ -97,6 +97,7 @@ builder.Services.AddSingleton<AlertDispatcher>();
 builder.Services.AddSingleton(new DemoInboxHolder(AppFlags.Demo(builder.Configuration)));
 builder.Services.AddSingleton<LiveBoard>();
 builder.Services.AddSingleton<LiveCopyBoard>();
+builder.Services.AddSingleton<TransferLog>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<RunNowService>();
 builder.Services.AddSingleton<OutboxService>();
@@ -119,6 +120,7 @@ builder.Services.AddHostedService<MonitorService>();
 builder.Services.AddHostedService<LiveCopyPoller>();
 builder.Services.AddHostedService<OutboxWorker>();
 builder.Services.AddScoped<AdminAccountService>();
+builder.Services.AddScoped<ThemePreferenceService>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();

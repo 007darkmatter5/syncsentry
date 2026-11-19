@@ -76,7 +76,8 @@ public sealed class MonitorTick(
 
             mountViews.Add(new MountView(
                 item.Name, item.Path, state, item.FsType, item.Source,
-                space?.Total, space?.Used, space?.Free, space?.Detail, item.Configured));
+                space?.Total, space?.Used, space?.Free, space?.Detail, item.Configured,
+                space?.ResponseMilliseconds));
 
             foreach (var message in AlertPolicy.ForMount(toggles, item.Name, item.Path, previous, state, since))
                 await alerts.DispatchAsync(db, target, message, blocked, cancellationToken);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using SyncSentry.Alerts;
+using SyncSentry.Data;
 using SyncSentry.Host;
 using SyncSentry.Jobs;
 using SyncSentry.Outbox;
@@ -130,6 +131,39 @@ public class OutboxTests
         Assert.True(incomplete.Incomplete);
         Assert.Empty(incomplete.Sample);
         Assert.Equal(0, incomplete.Count);
+    }
+}
+
+public class BandwidthTests
+{
+    [Fact]
+    public void Daytime_limit_is_off_overnight()
+    {
+        var morning = new DateTimeOffset(2026, 11, 19, 8, 0, 0, TimeSpan.Zero);
+        var night = new DateTimeOffset(2026, 11, 19, 23, 30, 0, TimeSpan.Zero);
+        Assert.Equal("1M", BandwidthPlan.DesiredRate("schedule", 5, 1, 7, 23, morning));
+        Assert.Equal("off", BandwidthPlan.DesiredRate("schedule", 5, 1, 7, 23, night));
+        Assert.Equal("off", BandwidthPlan.DesiredRate("off", 5, 1, 7, 23, morning));
+        Assert.True(BandwidthPlan.IsNewSession(80, 1));
+        Assert.False(BandwidthPlan.IsNewSession(80, 90));
+    }
+
+    [Fact]
+    public void A_finished_pair_stays_up_to_date()
+    {
+        var history = new[]
+        {
+            new HistoryRow("Movies/Done.mkv", 10, DateTimeOffset.Parse("2026-11-19T18:00:00Z"), true, null, "/mnt/remotes/UNASPRO_Media/Movies", "/mnt/user/data/media/Movies")
+        };
+        var jobs = new[]
+        {
+            new SyncJobDefinition { Id = Guid.NewGuid(), Name = "Movies", Enabled = true, Source = "/mnt/remotes/UNASPRO_Media/Movies", Destination = "/mnt/user/data/media/Movies" }
+        };
+        var panels = FolderBoards.Build([], [], history, jobs, []);
+        var panel = Assert.Single(panels);
+        Assert.Equal("uptodate", panel.Status);
+        Assert.Equal("Movies/Done.mkv", panel.LastFile);
+        Assert.Equal(jobs[0].Id, panel.SavedTaskId);
     }
 }
 

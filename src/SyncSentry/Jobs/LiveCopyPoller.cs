@@ -45,6 +45,17 @@ public sealed record FinishedFileRow(
     string SourcePath,
     string DestinationPath);
 
+public sealed record ServerFace(
+    string Hostname,
+    double DownloadBytesPerSecond,
+    double UploadBytesPerSecond,
+    string LimitText,
+    bool? AcceptRoutes,
+    bool RoutesStale,
+    TimeSpan Uptime,
+    string AppVersion,
+    string? RcloneVersion);
+
 public sealed record LiveCopySnapshot(
     DateTimeOffset? UpdatedUtc,
     RcAccess Access,
@@ -52,7 +63,9 @@ public sealed record LiveCopySnapshot(
     IReadOnlyList<CopyCard> Copies,
     IReadOnlyList<LiveFileRow> Files,
     IReadOnlyList<FinishedFileRow> Finished,
-    DateTimeOffset? LastActivityUtc)
+    DateTimeOffset? LastActivityUtc,
+    IReadOnlyList<FolderPanel>? Panels = null,
+    ServerFace? Server = null)
 {
     public static LiveCopySnapshot Empty { get; } = new(null, RcAccess.Ok, null, [], [], [], null);
 }
@@ -84,10 +97,15 @@ public sealed class LiveCopyPoller(
     ISecretProtector secrets,
     LiveBoard mounts,
     LiveCopyBoard board,
+    TransferLog transfers,
     IConfiguration configuration,
+    ILogger<LiveCopyPoller> logger,
     TimeProvider clock) : BackgroundService
 {
+    private static readonly DateTimeOffset Started = DateTimeOffset.UtcNow;
     private int _busy;
+    private double? _lastElapsed;
+    private string? _lastApplied;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -106,9 +124,9 @@ public sealed class LiveCopyPoller(
                 {
                     return;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // The page shows the last good snapshot. A bad poll must not stop the loop.
+                    logger.LogWarning("Live copy poll failed ({Type}): {Detail}", ex.GetType().Name, SecretRedactor.ForDisplay(ex.Message, 240));
                 }
                 finally
                 {
@@ -193,10 +211,94 @@ public sealed class LiveCopyPoller(
                 item.Destination))
             .ToArray();
 
+        var historyDays = settings.HistoryDays <= 0 ? 30 : settings.HistoryDays;
+        await transfers.RememberAsync(snapshot.Finished ?? [], historyDays, now, cancellationToken);
+        var history = await transfers.RecentAsync(false, 400, cancellationToken);
+        var saved = await context.Jobs.AsNoTracking().Where(item => item.Enabled).ToListAsync(cancellationToken);
+        var panels = FolderBoards.Build(copies, files, history, saved, mountViews);
+        var limit = await ApplyLimitAsync(settings, snapshot.Global?.ElapsedSeconds, password.Value, cancellationToken);
+        var version = snapshot.Access == RcAccess.Ok
+            ? await rclone.GetVersionAsync(settings.RcUrl, settings.RcUser, password.Value, cancellationToken)
+            : null;
+        var (down, up) = Rates(copies);
+        var tail = mounts.Current.Tailscale;
         var previous = board.Current;
         var active = copies.Count > 0 || files.Count > 0;
-        var last = active ? now : previous.LastActivityUtc;
-        board.Publish(new LiveCopySnapshot(now, snapshot.Access, snapshot.Error, copies, files, finished, last));
+        var lastSeen = active ? now : previous.LastActivityUtc;
+        board.Publish(new LiveCopySnapshot(
+            now,
+            snapshot.Access,
+            snapshot.Error,
+            copies,
+            files,
+            finished,
+            lastSeen,
+            panels,
+            new ServerFace(
+                Environment.MachineName,
+                down,
+                up,
+                limit,
+                tail.AcceptRoutes,
+                tail.Stale,
+                now - Started,
+                AppVersion(),
+                version)));
+    }
+
+    private async Task<string> ApplyLimitAsync(InstanceSetting settings, double? elapsed, string? password, CancellationToken cancellationToken)
+    {
+        var wanted = BandwidthPlan.DesiredRate(
+            settings.BandwidthMode,
+            settings.BandwidthMegabytes,
+            settings.ScheduleMegabytes,
+            settings.ScheduleStartHour,
+            settings.ScheduleEndHour,
+            clock.GetLocalNow());
+        if (!Rules.RcUrl(settings.RcUrl))
+            return BandwidthPlan.Display(wanted, wanted == "off" ? -1 : 0);
+
+        var current = await rclone.GetBandwidthAsync(settings.RcUrl, settings.RcUser, password, cancellationToken);
+        var freshProcess = BandwidthPlan.IsNewSession(_lastElapsed, elapsed);
+        _lastElapsed = elapsed;
+        var matches = current.Ok && string.Equals(current.Rate, wanted, StringComparison.OrdinalIgnoreCase);
+        if (matches && !freshProcess)
+            return BandwidthPlan.Display(current.Rate, current.BytesPerSecond);
+        if (!freshProcess && !current.Ok && string.Equals(_lastApplied, wanted, StringComparison.OrdinalIgnoreCase))
+            return BandwidthPlan.Display(wanted, -1);
+
+        var applied = await rclone.SetBandwidthAsync(settings.RcUrl, settings.RcUser, password, wanted, cancellationToken);
+        _lastApplied = wanted;
+        logger.LogInformation("Bandwidth limit set to {Rate}.", wanted);
+        return applied.Ok ? BandwidthPlan.Display(applied.Rate, applied.BytesPerSecond) : BandwidthPlan.Display(wanted, -1);
+    }
+
+    private static (double Download, double Upload) Rates(IReadOnlyList<CopyCard> copies)
+    {
+        double down = 0, up = 0;
+        foreach (var copy in copies)
+        {
+            var remoteSource = copy.SourcePath.Contains("/mnt/remotes", StringComparison.Ordinal);
+            var remoteDest = copy.DestinationPath.Contains("/mnt/remotes", StringComparison.Ordinal);
+            if (remoteSource && !remoteDest)
+                down += copy.Speed;
+            else if (remoteDest && !remoteSource)
+                up += copy.Speed;
+            else
+                down += copy.Speed;
+        }
+
+        return (down, up);
+    }
+
+    private static string AppVersion()
+    {
+        var version = typeof(LiveCopyPoller).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion ?? "dev";
+        var plus = version.IndexOf('+');
+        return plus < 0 ? version : version[..plus];
     }
 
     private static bool HasActivity(RcStats stats)

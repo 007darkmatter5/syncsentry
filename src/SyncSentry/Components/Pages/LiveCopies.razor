@@ -1,154 +1,139 @@
 @page "/"
 @inject LiveCopyBoard Copies
+@inject LiveBoard Mounts
+@inject SettingsStore Store
+@inject RunNowService RunNow
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
 @implements IDisposable
 
-<PageTitle>Live copies · SyncSentry</PageTitle>
-
-<div class="kicker">Right now</div>
-<MudText Typo="Typo.h4" GutterBottom="true">Live copies</MudText>
-<MudText Typo="Typo.body2" Class="mb-4 muted">Each file rclone is moving, where it is coming from, and where it is going.</MudText>
+<PageTitle>Dashboard · SyncSentry</PageTitle>
 
 @{
     var live = Copies.Current;
-    var problem = live.Access != RcAccess.Ok;
+    var server = live.Server;
+    var panels = live.Panels ?? [];
 }
 
-@if (problem)
+@if (live.Access != RcAccess.Ok)
 {
-    <MudAlert Severity="@(live.Access == RcAccess.Unauthorized ? Severity.Error : Severity.Warning)" Class="mb-4" Variant="Variant.Outlined">
+    <MudAlert Severity="@(live.Access == RcAccess.Unauthorized ? Severity.Error : Severity.Warning)" Class="mb-3" Variant="Variant.Outlined" Dense="true">
         @ProblemText(live)
         <MudLink Href="settings" Class="ml-2">Open settings</MudLink>
     </MudAlert>
 }
 
-@if (live.Copies.Count == 0)
-{
-    <MudPaper Class="pa-6 mb-4" Elevation="0" Outlined="true">
-        <MudText Typo="Typo.h6">No copy running right now</MudText>
-        <MudText Typo="Typo.body2" Class="muted">
-            @if (live.LastActivityUtc is null)
-            {
-                <span>Nothing has been copied since this page started watching.</span>
-            }
-            else
-            {
-                <span>Last activity @live.LastActivityUtc.Value.ToLocalTime().ToString("g").</span>
-            }
-        </MudText>
-    </MudPaper>
-}
-else
-{
-    @foreach (var copy in live.Copies)
-    {
-        <MudPaper Class="pa-4 mb-4 copy-card" Elevation="0" Outlined="true">
-            @if (copy.FromLog)
-            {
-                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Class="mb-2">From the log file</MudChip>
-            }
-            <div class="copy-route">
-                <MudTooltip Text="@Tip(copy.SourcePath)">
-                    <span class="copy-place">@copy.SourceLabel</span>
-                </MudTooltip>
-                <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Class="mx-2" />
-                <MudTooltip Text="@Tip(copy.DestinationPath)">
-                    <span class="copy-place">@copy.DestinationLabel</span>
-                </MudTooltip>
+<MudGrid>
+    <MudItem xs="12" lg="7">
+        <div class="panel-heading">Copies (@panels.Count)</div>
+        @if (panels.Count == 0)
+        {
+            <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+                <MudText>No copies to show yet.</MudText>
+                <MudText Typo="Typo.body2" Class="muted">When a copy runs, or after one finishes, it stays here with the last time it ran.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudExpansionPanels MultiExpansion="true">
+                @foreach (var panel in panels)
+                {
+                    <MudExpansionPanel Class="copy-panel" Expanded="@(panel.Status == "copying")">
+                        <TitleContent>
+                            <div class="panel-title">
+                                <span>@panel.Title</span>
+                                <span class="status-badge @BadgeClass(panel.Status)">@BadgeText(panel)</span>
+                            </div>
+                            <div class="st-track"><div class="st-progress @BadgeClass(panel.Status)" style="@($"width:{panel.Percent ?? (panel.Status == "uptodate" ? 100 : 0)}%")"></div></div>
+                        </TitleContent>
+                        <ChildContent>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /><span class="kv-key">Source path</span><MudTooltip Text="@panel.SourcePath"><span class="kv-val path">@panel.SourcePath</span></MudTooltip></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.DriveFolderUpload" Size="Size.Small" /><span class="kv-key">Destination path</span><MudTooltip Text="@panel.DestinationPath"><span class="kv-val path">@panel.DestinationPath</span></MudTooltip></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Inventory" Size="Size.Small" /><span class="kv-key">Left to copy</span><span class="kv-val">@panel.LeftFiles files, @TextFormat.Bytes(panel.LeftBytes)</span></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Speed" Size="Size.Small" /><span class="kv-key">Speed</span><span class="kv-val">@TextFormat.Speed(panel.Speed)</span></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Timelapse" Size="Size.Small" /><span class="kv-key">ETA</span><span class="kv-val">@TextFormat.Eta(panel.EtaSeconds)</span></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Small" /><span class="kv-key">Last file copied</span><span class="kv-val path">@(panel.LastFile ?? "—")</span></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Schedule" Size="Size.Small" /><span class="kv-key">Last run</span><span class="kv-val">@(panel.LastRun?.ToLocalTime().ToString("g") ?? "—")</span></div>
+                            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Size="Size.Small" /><span class="kv-key">Errors</span><span class="kv-val">@panel.Errors</span></div>
+                            @if (panel.Files.Count > 0)
+                            {
+                                <MudText Typo="Typo.subtitle2" Class="mt-3">Copying now</MudText>
+                                @foreach (var file in panel.Files)
+                                {
+                                    <div class="file-line">
+                                        <span class="path">@file.Name</span>
+                                        <MudProgressLinear Rounded="true" Value="@file.Percent" Color="Color.Info" Class="flex-grow-1 mx-2" />
+                                        <span class="file-meta">@file.Percent% · @TextFormat.Speed(file.Speed)</span>
+                                    </div>
+                                }
+                            }
+                            <div class="mt-3 d-flex flex-wrap gap-2">
+                                @if (panel.SavedTaskId is not null)
+                                {
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_busy" OnClick="() => Run(panel.SavedTaskId.Value)">Run now</MudButton>
+                                }
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="Failed">Show failed items</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="Recent">Recent changes</MudButton>
+                            </div>
+                        </ChildContent>
+                    </MudExpansionPanel>
+                }
+            </MudExpansionPanels>
+        }
+    </MudItem>
+    <MudItem xs="12" lg="5">
+        <div class="panel-heading">This server</div>
+        <MudPaper Class="pa-3 mb-3" Elevation="0" Outlined="true">
+            <MudText Typo="Typo.h6">@(server?.Hostname ?? "This server")</MudText>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Download" Size="Size.Small" /><span class="kv-key">Download</span><span class="kv-val">@TextFormat.Speed(server?.DownloadBytesPerSecond ?? 0)</span></div>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Upload" Size="Size.Small" /><span class="kv-key">Upload</span><span class="kv-val">@TextFormat.Speed(server?.UploadBytesPerSecond ?? 0)</span></div>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Speed" Size="Size.Small" /><span class="kv-key">Speed limit</span><span class="kv-val">@(server?.LimitText ?? "Off")</span></div>
+            <div class="limit-row">
+                <MudSelect T="string" Value="_mode" ValueChanged="ChangeMode" Label="Limit" Variant="Variant.Outlined" Margin="Margin.Dense">
+                    <MudSelectItem T="string" Value="@("off")">Off</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("custom")">Custom</MudSelectItem>
+                </MudSelect>
+                @if (_mode == "custom")
+                {
+                    <MudNumericField T="double" @bind-Value="_megabytes" Label="MB/s" Variant="Variant.Outlined" Margin="Margin.Dense" Min="0.1" Max="10000" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="ApplyLimit">Apply</MudButton>
+                }
             </div>
-            <div class="path muted mb-2">@ShowPath(copy.SourcePath) → @ShowPath(copy.DestinationPath)</div>
-            <MudProgressLinear Class="my-2" Rounded="true" Color="Color.Primary" Value="@TextFormat.Percent(copy.Bytes, copy.TotalBytes)" />
-            <MudText Typo="Typo.body2">
-                @TextFormat.Bytes(copy.Bytes) / @TextFormat.Bytes(copy.TotalBytes)
-                · @TextFormat.Percent(copy.Bytes, copy.TotalBytes)%
-                · @TextFormat.Speed(copy.Speed)
-                · ETA @TextFormat.Eta(copy.EtaSeconds)
-                · @copy.FilesDone / @copy.FilesTotal files
-                · @copy.Errors errors
-                · elapsed @TextFormat.Eta(copy.ElapsedSeconds is null ? null : (int)copy.ElapsedSeconds)
-            </MudText>
-            @if (!string.IsNullOrWhiteSpace(copy.Note))
-            {
-                <MudText Typo="Typo.caption" Class="d-block mt-1 muted">@copy.Note</MudText>
-            }
+            <MudText Typo="Typo.caption" Class="muted">A schedule, if you set one, is under Settings. rclone treats 1M as 1,048,576 bytes per second.</MudText>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.VpnLock" Size="Size.Small" /><span class="kv-key">Tailscale routes</span><span class="kv-val">@Routes(server)</span></div>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Small" /><span class="kv-key">Uptime</span><span class="kv-val">@TextFormat.Eta(server is null ? null : (int)server.Uptime.TotalSeconds)</span></div>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" /><span class="kv-key">Version</span><span class="kv-val">@(server?.AppVersion ?? "dev")</span></div>
+            <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Memory" Size="Size.Small" /><span class="kv-key">rclone</span><span class="kv-val">@(server?.RcloneVersion ?? "—")</span></div>
         </MudPaper>
-    }
-}
 
-<MudText Typo="Typo.h6" Class="mb-2">Files copying now</MudText>
-@if (live.Files.Count == 0)
-{
-    <MudText Typo="Typo.body2" Class="mb-4 muted">No individual file is transferring this moment.</MudText>
-}
-else
-{
-    <MudTable Items="live.Files" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0" Class="mb-6">
-        <HeaderContent>
-            <MudTh>File</MudTh>
-            <MudTh>From</MudTh>
-            <MudTh>To</MudTh>
-            <MudTh>Progress</MudTh>
-            <MudTh>Speed</MudTh>
-            <MudTh>ETA</MudTh>
-        </HeaderContent>
-        <RowTemplate Context="file">
-            <MudTd DataLabel="File"><span class="path">@file.Name</span></MudTd>
-            <MudTd DataLabel="From">
-                <MudTooltip Text="@Tip(file.SourcePath)"><span>@file.SourceLabel</span></MudTooltip>
-            </MudTd>
-            <MudTd DataLabel="To">
-                <MudTooltip Text="@Tip(file.DestinationPath)"><span>@file.DestinationLabel</span></MudTooltip>
-            </MudTd>
-            <MudTd DataLabel="Progress" Style="min-width: 10rem">
-                <MudProgressLinear Rounded="true" Color="Color.Primary" Value="@file.Percent" />
-                <span class="muted">@file.Percent% · @TextFormat.Bytes(file.Bytes) / @TextFormat.Bytes(file.Size)</span>
-            </MudTd>
-            <MudTd DataLabel="Speed">@TextFormat.Speed(file.Speed)</MudTd>
-            <MudTd DataLabel="ETA">@TextFormat.Eta(file.EtaSeconds)</MudTd>
-        </RowTemplate>
-    </MudTable>
-}
-
-<MudText Typo="Typo.h6" Class="mb-2">Recently finished</MudText>
-@if (live.Finished.Count == 0)
-{
-    <MudText Typo="Typo.body2" Class="muted">Finished files show up here after rclone reports them.</MudText>
-}
-else
-{
-    <MudTable Items="live.Finished" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
-        <HeaderContent>
-            <MudTh>File</MudTh>
-            <MudTh>Size</MudTh>
-            <MudTh>When</MudTh>
-            <MudTh>Result</MudTh>
-        </HeaderContent>
-        <RowTemplate Context="file">
-            <MudTd DataLabel="File">
-                <span class="path">@file.Name</span>
-                <div class="muted">@file.SourceLabel → @file.DestinationLabel</div>
-            </MudTd>
-            <MudTd DataLabel="Size">@TextFormat.Bytes(file.Size)</MudTd>
-            <MudTd DataLabel="When">@(file.CompletedAt?.ToLocalTime().ToString("g") ?? "—")</MudTd>
-            <MudTd DataLabel="Result">
-                @if (file.Ok)
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Success">Copied</MudChip>
-                }
-                else
-                {
-                    <MudChip T="string" Size="Size.Small" Color="Color.Error">Failed</MudChip>
-                    <div class="muted">@file.Error</div>
-                }
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
-}
+        <div class="panel-heading">Locations (@Mounts.Current.Mounts.Count)</div>
+        @foreach (var mount in Mounts.Current.Mounts)
+        {
+            <MudPaper Class="pa-3 mb-2" Elevation="0" Outlined="true">
+                <div class="panel-title">
+                    <span>@mount.Name</span>
+                    <span class="status-badge @LocationClass(mount.State)">@LocationText(mount.State)</span>
+                </div>
+                <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Lan" Size="Size.Small" /><span class="kv-key">Address</span><MudTooltip Text="@mount.Path"><span class="kv-val path">@(string.IsNullOrWhiteSpace(mount.Source) ? mount.Path : mount.Source)</span></MudTooltip></div>
+                <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Timer" Size="Size.Small" /><span class="kv-key">Response</span><span class="kv-val">@(mount.ResponseMilliseconds is null ? "—" : mount.ResponseMilliseconds + " ms")</span></div>
+                <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Storage" Size="Size.Small" /><span class="kv-key">Space</span><span class="kv-val">@TextFormat.Bytes(mount.Free) free · @TextFormat.Bytes(mount.Used) used</span></div>
+                <div class="kv"><MudIcon Icon="@Icons.Material.Filled.Update" Size="Size.Small" /><span class="kv-key">Last checked</span><span class="kv-val">@(Mounts.Current.UpdatedUtc?.ToLocalTime().ToString("g") ?? "—")</span></div>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
 
 @code {
     private PeriodicTimer? _timer;
+    private string _mode = "off";
+    private double _megabytes = 1;
+    private bool _busy;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
+        var general = await Store.LoadGeneralAsync();
+        _mode = general.BandwidthMode == "custom" ? "custom" : "off";
+        _megabytes = general.BandwidthMegabytes <= 0 ? 1 : general.BandwidthMegabytes;
         _timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         _ = Loop();
     }
@@ -165,17 +150,82 @@ else
         }
     }
 
+    private async Task ChangeMode(string mode)
+    {
+        _mode = mode;
+        if (mode == "off")
+            await Store.SaveBandwidthAsync("off", _megabytes);
+    }
+
+    private async Task ApplyLimit()
+        => await Store.SaveBandwidthAsync("custom", _megabytes);
+
+    private async Task Run(Guid id)
+    {
+        _busy = true;
+        var result = await RunNow.StartAsync(id, CancellationToken.None);
+        Snackbar.Add(result.Message, result.Ok ? Severity.Success : Severity.Warning);
+        _busy = false;
+    }
+
+    private Task Recent() => Dialogs.ShowAsync<RecentChangesDialog>("Recent changes");
+
+    private Task Failed() => Dialogs.ShowAsync<FailedItemsDialog>("Failed items");
+
+    private static string BadgeClass(string status) => status switch
+    {
+        "uptodate" => "badge-ok",
+        "copying" => "badge-copy",
+        "waiting" => "badge-wait",
+        "error" => "badge-error",
+        _ => "badge-unknown"
+    };
+
+    private static string BadgeText(FolderPanel panel) => panel.Status switch
+    {
+        "uptodate" => "Up to date",
+        "copying" => "Copying " + (panel.Percent ?? 0) + "%",
+        "waiting" => "Waiting",
+        "error" => "Error",
+        _ => "Unknown"
+    };
+
+    private static string LocationClass(string state) => state switch
+    {
+        "mounted" => "badge-ok",
+        "unresponsive" => "badge-wait",
+        "unmounted" => "badge-unknown",
+        _ => "badge-unknown"
+    };
+
+    private static string LocationText(string state) => state switch
+    {
+        "mounted" => "Connected",
+        "unresponsive" => "Stale",
+        "unmounted" => "Disconnected",
+        _ => "Unknown"
+    };
+
     private static string ProblemText(LiveCopySnapshot live) => live.Access switch
     {
         RcAccess.Unauthorized => "rclone refused the username or password.",
-        RcAccess.Unreachable => "rclone did not answer. Check that it is running and that the status address is one this container can reach.",
+        RcAccess.Unreachable => "rclone did not answer.",
         RcAccess.NotConfigured => "rclone's status address is not set.",
         _ => live.Message ?? "rclone's status page could not be read."
     };
 
-    private static string Tip(string? path) => string.IsNullOrWhiteSpace(path) ? "Path not reported" : path;
-
-    private static string ShowPath(string? path) => string.IsNullOrWhiteSpace(path) ? "path not reported" : path;
+    private static string Routes(ServerFace? server)
+    {
+        if (server is null)
+            return "Unknown";
+        var text = server.AcceptRoutes switch
+        {
+            true => "On",
+            false => "Off",
+            _ => "Unknown"
+        };
+        return server.RoutesStale ? text + " (stale)" : text;
+    }
 
     public void Dispose() => _timer?.Dispose();
 }

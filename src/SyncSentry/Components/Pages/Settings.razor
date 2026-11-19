@@ -72,6 +72,17 @@
                     <MudNumericField T="int" @bind-Value="_general.OutboxCacheMinutes" Label="Outbox cache minutes" Variant="Variant.Outlined" Class="mt-2" Min="1" Max="1440" />
                     <MudNumericField T="int" @bind-Value="_general.ScanSeconds" Label="Scan seconds" Variant="Variant.Outlined" Class="mt-2" Min="5" Max="300" />
                     <MudNumericField T="int" @bind-Value="_general.ScanMaxFiles" Label="Scan file cap" Variant="Variant.Outlined" Class="mt-2" Min="1000" Max="500000" />
+                    <MudNumericField T="int" @bind-Value="_general.HistoryDays" Label="Keep finished files (days)" Variant="Variant.Outlined" Class="mt-2" Min="1" Max="3650" />
+                    <MudSelect T="string" @bind-Value="_general.BandwidthMode" Label="Speed limit" Variant="Variant.Outlined" Class="mt-2">
+                        <MudSelectItem T="string" Value="@("off")">Off</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("custom")">Custom</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("schedule")">Schedule</MudSelectItem>
+                    </MudSelect>
+                    <MudNumericField T="double" @bind-Value="_general.BandwidthMegabytes" Label="Custom MB/s" Variant="Variant.Outlined" Class="mt-2" Min="0" Max="10000" />
+                    <MudText Typo="Typo.caption" Class="muted">Schedule example: 1 MB/s from 7:00 until 23:00, and no limit overnight. Hours use this container's timezone.</MudText>
+                    <MudNumericField T="double" @bind-Value="_general.ScheduleMegabytes" Label="Limited MB/s" Variant="Variant.Outlined" Class="mt-2" Min="0" Max="10000" />
+                    <MudNumericField T="int" @bind-Value="_general.ScheduleStartHour" Label="Limit starts (hour 0-23)" Variant="Variant.Outlined" Class="mt-2" Min="0" Max="23" />
+                    <MudNumericField T="int" @bind-Value="_general.ScheduleEndHour" Label="Limit ends (hour 0-24)" Variant="Variant.Outlined" Class="mt-2" Min="0" Max="24" />
                 </MudItem>
             </MudGrid>
             <MudButton Class="mt-4" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" OnClick="SaveGeneral">Save settings</MudButton>

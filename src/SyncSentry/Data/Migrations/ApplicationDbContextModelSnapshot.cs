@@ -272,6 +272,16 @@ namespace SyncSentry.Data.Migrations
                     b.Property<bool>("AlertMountUnresponsive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<double>("BandwidthMegabytes")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("BandwidthMode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("HistoryDays")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("LogStaleSeconds")
                         .HasColumnType("INTEGER");
 
@@ -316,6 +326,15 @@ namespace SyncSentry.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("ScanSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ScheduleEndHour")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ScheduleMegabytes")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("ScheduleStartHour")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("TailscaleSocketPath")
@@ -607,6 +626,77 @@ namespace SyncSentry.Data.Migrations
                     b.HasIndex("LogSourceId");
 
                     b.ToTable("Jobs", (string)null);
+                });
+
+            modelBuilder.Entity("SyncSentry.Data.TransferEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CompletedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(240)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DestinationPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Ok")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompletedUtc");
+
+                    b.HasIndex("DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("TransferEvents", (string)null);
+                });
+
+            modelBuilder.Entity("SyncSentry.Data.UserPreference", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DarkMode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("UserPreferences", (string)null);
                 });
 
             modelBuilder.Entity("SyncSentry.Data.WatchedMount", b =>

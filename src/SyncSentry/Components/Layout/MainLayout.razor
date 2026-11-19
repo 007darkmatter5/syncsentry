@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject ThemePreferenceService Themes
 
 <MudThemeProvider @ref="_themeProvider" Theme="_theme" IsDarkMode="_dark" />
 <MudPopoverProvider />
@@ -11,6 +12,7 @@
         <img src="icon.svg" alt="" width="28" height="28" class="ml-2 mr-2" />
         <MudText Typo="Typo.h6">SyncSentry</MudText>
         <MudSpacer />
+        <MudIconButton Icon="@(_dark ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)" Color="Color.Inherit" aria-label="Toggle color theme" OnClick="ToggleTheme" />
         <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small" Icon="@Icons.Material.Filled.Visibility">Watches only</MudChip>
     </MudAppBar>
     <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Breakpoint="Breakpoint.Md">
@@ -32,20 +34,40 @@
 @code {
     private bool _drawerOpen = true;
     private bool _dark;
+    private bool _themeChosen;
     private MudThemeProvider _themeProvider = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var saved = await Themes.ReadAsync();
+        if (saved is not null)
+        {
+            _dark = saved.Value;
+            _themeChosen = true;
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || !RendererInfo.IsInteractive)
+        if (!firstRender || !RendererInfo.IsInteractive || _themeChosen)
             return;
         _dark = await _themeProvider.GetSystemDarkModeAsync();
         await _themeProvider.WatchSystemDarkModeAsync(dark =>
         {
+            if (_themeChosen)
+                return Task.CompletedTask;
             _dark = dark;
             StateHasChanged();
             return Task.CompletedTask;
         });
         StateHasChanged();
+    }
+
+    private async Task ToggleTheme()
+    {
+        _dark = !_dark;
+        _themeChosen = true;
+        await Themes.SetAsync(_dark);
     }
 
     private readonly MudTheme _theme = new()

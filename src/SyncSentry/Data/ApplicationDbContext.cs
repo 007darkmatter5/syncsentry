@@ -15,6 +15,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<AlertEvent> AlertEvents => Set<AlertEvent>();
     public DbSet<MountStateRow> MountStates => Set<MountStateRow>();
     public DbSet<RouteStateRow> RouteStates => Set<RouteStateRow>();
+    public DbSet<TransferEvent> TransferEvents => Set<TransferEvent>();
+    public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -105,6 +107,25 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         });
 
         builder.Entity<RouteStateRow>(entity => entity.ToTable("RouteState"));
+
+        builder.Entity<TransferEvent>(entity =>
+        {
+            entity.ToTable("TransferEvents");
+            entity.Property(item => item.DedupeKey).HasMaxLength(240).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.SourcePath).HasMaxLength(500);
+            entity.Property(item => item.DestinationPath).HasMaxLength(500);
+            entity.Property(item => item.Error).HasMaxLength(300);
+            entity.HasIndex(item => item.DedupeKey).IsUnique();
+            entity.HasIndex(item => item.CompletedUtc);
+        });
+
+        builder.Entity<UserPreference>(entity =>
+        {
+            entity.ToTable("UserPreferences");
+            entity.Property(item => item.UserId).HasMaxLength(450).IsRequired();
+            entity.HasIndex(item => item.UserId).IsUnique();
+        });
     }
 }
 

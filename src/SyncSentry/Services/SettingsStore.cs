@@ -32,6 +32,12 @@ public sealed class GeneralEdit
     public string TailscaleStatusPath { get; set; } = "";
     public string TailscaleSocketPath { get; set; } = "";
     public string TriggerDirectory { get; set; } = "";
+    public int HistoryDays { get; set; } = 30;
+    public string BandwidthMode { get; set; } = "off";
+    public double BandwidthMegabytes { get; set; } = 1;
+    public int ScheduleStartHour { get; set; } = 7;
+    public int ScheduleEndHour { get; set; } = 23;
+    public double ScheduleMegabytes { get; set; } = 1;
 }
 
 public sealed class MountEdit
@@ -101,7 +107,13 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
             ScanSeconds = setting.ScanSeconds,
             TailscaleStatusPath = setting.TailscaleStatusPath,
             TailscaleSocketPath = setting.TailscaleSocketPath,
-            TriggerDirectory = setting.TriggerDirectory
+            TriggerDirectory = setting.TriggerDirectory,
+            HistoryDays = setting.HistoryDays,
+            BandwidthMode = setting.BandwidthMode,
+            BandwidthMegabytes = setting.BandwidthMegabytes,
+            ScheduleStartHour = setting.ScheduleStartHour,
+            ScheduleEndHour = setting.ScheduleEndHour,
+            ScheduleMegabytes = setting.ScheduleMegabytes
         };
     }
 
@@ -152,6 +164,12 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
         setting.TailscaleStatusPath = edit.TailscaleStatusPath.Trim();
         setting.TailscaleSocketPath = edit.TailscaleSocketPath.Trim();
         setting.TriggerDirectory = edit.TriggerDirectory.Trim();
+        setting.HistoryDays = Rules.Clamp(edit.HistoryDays, 1, 3650);
+        setting.BandwidthMode = edit.BandwidthMode is "custom" or "schedule" ? edit.BandwidthMode : "off";
+        setting.BandwidthMegabytes = Math.Clamp(edit.BandwidthMegabytes, 0, 10_000);
+        setting.ScheduleStartHour = Rules.Clamp(edit.ScheduleStartHour, 0, 23);
+        setting.ScheduleEndHour = Rules.Clamp(edit.ScheduleEndHour, 0, 24);
+        setting.ScheduleMegabytes = Math.Clamp(edit.ScheduleMegabytes, 0, 10_000);
         setting.UpdatedUtc = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
         return null;
@@ -383,6 +401,17 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
         if (row is null)
             return;
         db.OutboxPairs.Remove(row);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SaveBandwidthAsync(string mode, double megabytes, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var setting = await db.Settings.OrderBy(item => item.Id).FirstAsync(cancellationToken);
+        setting.BandwidthMode = mode is "custom" or "schedule" ? mode : "off";
+        if (mode == "custom")
+            setting.BandwidthMegabytes = Math.Clamp(megabytes, 0, 10_000);
+        setting.UpdatedUtc = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
     }
 

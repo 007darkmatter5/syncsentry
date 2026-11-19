@@ -8,8 +8,8 @@ It does not mount or unmount anything, and it does not write to media. mergerfs 
 
 ## What you see
 
-- **Live copies.** The home page. Each running rclone copy shows the source folder, the destination folder, speed, progress, and ETA. Under that, every file moving right now has its own row. Recently finished files are listed underneath. If rclone's status page does not answer, the page says so and falls back to the log.
-- **Mounts.** mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
+- **Dashboard.** The home page, laid out like the Syncthing web UI. The left column is one card per copy (source folder to destination folder), with a colored status (Up to date, Copying, Waiting, Error, Unknown) and a thin progress bar. Open a card for the paths, what is left, speed, ETA, the last file, and the files moving right now. Finished copies stay on the page with the last time they ran. The right column is this server (download and upload rate, the speed limit, Tailscale accept-routes, uptime, versions) and one card per location (connected, stale, or disconnected, with free space).
+- **Mounts.** The same locations in more detail: mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
 - **Outbox.** For a source and a destination you configure, files that are missing, a different size, or newer on the source. Results are cached. A scan stops at a file cap and a time cap.
 - **Logs.** Tail, search, and level filter for the log files you configure.
 - **Run now.** Starts one saved job. It will not start a second copy of a job that is already running.
@@ -105,6 +105,8 @@ Copy [`deploy/unraid/rclone-rcd.sh`](deploy/unraid/rclone-rcd.sh) to User Script
 
 In Settings, set the RC URL to an address the container can reach. On a custom Docker network that is usually the Unraid LAN IP, `http://192.168.1.10:5572`. On the default bridge it is often the bridge gateway, such as `http://172.17.0.1:5572`. `http://127.0.0.1:5572` is the container itself, not the host. Put the user in the template or the UI. Put the password only in the UI. It is encrypted with the data-protection keys in `/config/keys` and is not shown again.
 
+The speed limit on the dashboard and under Settings is the one control that writes to rclone. It posts `core/bwlimit` (`1M` for about 1 MiB/s, or `off`). A schedule uses the container timezone: the start hour is included and the end hour is not, so 7 to 23 is 07:00 through 22:59. The copy script starts a new rclone process per folder, and a new process begins with no limit until the next check (about a second and a half) reapplies it. Every change is written to the SyncSentry log.
+
 An RC job is a saved `copy` or `sync` with a source, a destination, and optional include/exclude rules. **Run now** posts `sync/copy` or `sync/sync` with `_async` and a fixed stats group. Paths in an RC job are host paths, because rclone is running on the host. Keep the container's `/mnt/user` and `/mnt/remotes` bind mounts on the same paths so the UI and rclone agree. The log folder is the exception: the host file `/mnt/cache/appdata/mediamanny/logs/initial-copy.log` is `/logs/mediamanny/initial-copy.log` inside the container.
 
 ### 6. Logs and the outbox
@@ -168,7 +170,7 @@ SyncSentry__Demo=true ASPNETCORE_ENVIRONMENT=Development \
 
 These are the demo fixtures, including a CIFS mount that is pretending to be frozen.
 
-![Live copies](docs/images/screenshots/live.png)
+![Dashboard](docs/images/screenshots/live.png)
 
 ![Mounts](docs/images/screenshots/mounts.png)
 

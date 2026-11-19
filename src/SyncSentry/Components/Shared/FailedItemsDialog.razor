@@ -1,0 +1,44 @@
+@inject TransferLog Log
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Failed items</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_rows.Count == 0)
+        {
+            <MudText>No failed files are recorded.</MudText>
+        }
+        else
+        {
+            <MudTable Items="_rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
+                <HeaderContent>
+                    <MudTh>When</MudTh>
+                    <MudTh>File</MudTh>
+                    <MudTh>Error</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.CompletedUtc.ToLocalTime().ToString("g")</MudTd>
+                    <MudTd>
+                        <span class="path">@context.Name</span>
+                        <div class="muted">@context.SourcePath → @context.DestinationPath</div>
+                    </MudTd>
+                    <MudTd>@context.Error</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private IReadOnlyList<HistoryRow> _rows = [];
+
+    protected override async Task OnInitializedAsync()
+        => _rows = await Log.RecentAsync(true, 200);
+
+    private void Close() => MudDialog.Close();
+}

@@ -111,6 +111,15 @@ public class MonitorTests
 
         public Task<RemoteListResult> ListRemoteAsync(string? url, string? user, string? password, string remote, int maxFiles, CancellationToken cancellationToken)
             => Task.FromResult(new RemoteListResult(true, false, null, []));
+
+        public Task<BandwidthReading> GetBandwidthAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+            => Task.FromResult(new BandwidthReading("off", -1, true));
+
+        public Task<BandwidthReading> SetBandwidthAsync(string? url, string? user, string? password, string rate, CancellationToken cancellationToken)
+            => Task.FromResult(new BandwidthReading(rate, -1, true));
+
+        public Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+            => Task.FromResult<string?>("v1.76.0");
     }
 
     private sealed class DirectLogs : ILogReader

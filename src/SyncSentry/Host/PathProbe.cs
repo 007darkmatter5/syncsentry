@@ -5,6 +5,8 @@ namespace SyncSentry.Host;
 
 public sealed record ProbeResult(string State, long? Total, long? Free, long? Used, string? Detail)
 {
+    public int? ResponseMilliseconds { get; init; }
+
     public static ProbeResult Mounted(long total, long free, long used) => new("mounted", total, free, used, null);
 
     public static ProbeResult Unresponsive(string detail) => new("unresponsive", null, null, null, detail);
@@ -26,12 +28,15 @@ public sealed class PathProbeService(StuckProcesses stuck) : IPathProbe
             return ProbeResult.Unresponsive("an earlier check is still stuck");
 
         var start = AppSpawn.Create("--io-probe", path);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
         var result = await ProcessRunner.RunAsync(start, timeout, cancellationToken).ConfigureAwait(false);
+        watch.Stop();
+        var elapsed = (int)Math.Min(int.MaxValue, watch.ElapsedMilliseconds);
         if (result.TimedOut || !result.Exited)
         {
             if (result.LiveProcess is not null)
                 stuck.Remember(key, result.LiveProcess);
-            return ProbeResult.Unresponsive("timed out");
+            return ProbeResult.Unresponsive("timed out") with { ResponseMilliseconds = elapsed };
         }
 
         if (result.ExitCode == 0)
@@ -43,15 +48,15 @@ public sealed class PathProbeService(StuckProcesses stuck) : IPathProbe
                 var total = root.GetProperty("Total").GetInt64();
                 var free = root.GetProperty("Free").GetInt64();
                 var used = root.TryGetProperty("Used", out var usedValue) ? usedValue.GetInt64() : Math.Max(0, total - free);
-                return ProbeResult.Mounted(total, free, used);
+                return ProbeResult.Mounted(total, free, used) with { ResponseMilliseconds = elapsed };
             }
             catch (Exception ex) when (ex is JsonException or KeyNotFoundException or FormatException)
             {
-                return ProbeResult.Answered("space check returned nothing useful");
+                return ProbeResult.Answered("space check returned nothing useful") with { ResponseMilliseconds = elapsed };
             }
         }
 
-        return ProbeResult.Answered("space check failed");
+        return ProbeResult.Answered("space check failed") with { ResponseMilliseconds = elapsed };
     }
 }
 

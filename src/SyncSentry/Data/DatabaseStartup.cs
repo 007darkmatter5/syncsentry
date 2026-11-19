@@ -164,19 +164,17 @@ public static class DatabaseStartup
             });
         }
 
-        if (!await db.Jobs.AnyAsync(item => item.StartMode == "rc"))
+        var demoCopy = await db.Jobs.FirstOrDefaultAsync(item => item.StartMode == "rc");
+        if (demoCopy is null)
         {
-            db.Jobs.Add(new SyncJobDefinition
-            {
-                Id = Guid.NewGuid(),
-                Name = "Demo rc copy",
-                Enabled = true,
-                StartMode = "rc",
-                Operation = "copy",
-                Source = Path.Combine(DemoFiles.Root, "src"),
-                Destination = Path.Combine(DemoFiles.Root, "dst")
-            });
+            demoCopy = new SyncJobDefinition { Id = Guid.NewGuid(), StartMode = "rc", Operation = "copy" };
+            db.Jobs.Add(demoCopy);
         }
+
+        demoCopy.Name = "Movies";
+        demoCopy.Enabled = true;
+        demoCopy.Source = "/mnt/remotes/UNASPRO_Media/Movies";
+        demoCopy.Destination = "/mnt/user/data/media/Movies";
 
         if (!await db.JobRuns.AnyAsync())
         {

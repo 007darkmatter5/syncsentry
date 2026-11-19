@@ -80,7 +80,15 @@ public interface IRcloneRc
     Task<RcCallResult> StartAsync(string? url, string? user, string? password, RcStartRequest request, CancellationToken cancellationToken);
 
     Task<RemoteListResult> ListRemoteAsync(string? url, string? user, string? password, string remote, int maxFiles, CancellationToken cancellationToken);
+
+    Task<BandwidthReading> GetBandwidthAsync(string? url, string? user, string? password, CancellationToken cancellationToken);
+
+    Task<BandwidthReading> SetBandwidthAsync(string? url, string? user, string? password, string rate, CancellationToken cancellationToken);
+
+    Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken);
 }
+
+public sealed record BandwidthReading(string Rate, long BytesPerSecond, bool Ok);
 
 public sealed record RemoteListResult(bool Ok, bool Truncated, string? Error, IReadOnlyList<FileFingerprint> Files);
 
@@ -344,6 +352,40 @@ public sealed class RcloneRcClient(IHttpClientFactory factory) : IRcloneRc
         {
             return new RcCallResult(false, false, null, "rclone RC could not be reached.");
         }
+    }
+
+    public async Task<BandwidthReading> GetBandwidthAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+        => await BandwidthAsync(url, user, password, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<BandwidthReading> SetBandwidthAsync(string? url, string? user, string? password, string rate, CancellationToken cancellationToken)
+        => await BandwidthAsync(url, user, password, string.IsNullOrWhiteSpace(rate) ? "off" : rate.Trim(), cancellationToken).ConfigureAwait(false);
+
+    public async Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+    {
+        if (!Rules.RcUrl(url))
+            return null;
+        var result = await PostAsync(url!, user, password, "core/version", new { }, cancellationToken).ConfigureAwait(false);
+        if (result.Document is null)
+            return null;
+        using var doc = result.Document;
+        return doc.RootElement.TryGetProperty("version", out var version) ? version.GetString() : null;
+    }
+
+    private async Task<BandwidthReading> BandwidthAsync(string? url, string? user, string? password, string? rate, CancellationToken cancellationToken)
+    {
+        if (!Rules.RcUrl(url))
+            return new BandwidthReading("off", -1, false);
+        object payload = rate is null ? new { } : new { rate };
+        var result = await PostAsync(url!, user, password, "core/bwlimit", payload, cancellationToken).ConfigureAwait(false);
+        if (result.Document is null)
+            return new BandwidthReading(rate ?? "off", -1, false);
+        using var doc = result.Document;
+        var root = doc.RootElement;
+        var text = root.TryGetProperty("rate", out var rateValue) ? rateValue.GetString() ?? "off" : rate ?? "off";
+        long bytes = -1;
+        if (root.TryGetProperty("bytesPerSecond", out var bytesValue) && bytesValue.TryGetInt64(out var parsed))
+            bytes = parsed;
+        return new BandwidthReading(text, bytes, true);
     }
 
     public async Task<RemoteListResult> ListRemoteAsync(string? url, string? user, string? password, string remote, int maxFiles, CancellationToken cancellationToken)
