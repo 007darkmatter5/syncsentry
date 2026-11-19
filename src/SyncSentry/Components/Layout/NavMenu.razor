@@ -1,0 +1,43 @@
+@inject AdminAccountService Accounts
+
+<MudNavMenu>
+    <AuthorizeView>
+        <Authorized>
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Mounts</MudNavLink>
+            <MudNavLink Href="jobs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Sync">Jobs</MudNavLink>
+            <MudNavLink Href="outbox" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Outbox">Outbox</MudNavLink>
+            <MudNavLink Href="logs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Article">Logs</MudNavLink>
+            <MudNavLink Href="settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+            <MudNavLink Href="account/password" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Lock">Password</MudNavLink>
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.caption" Class="px-4 pb-2 d-block">@context.User.Identity?.Name</MudText>
+            <form action="Account/Logout" method="post">
+                <AntiforgeryToken />
+                <button type="submit" class="mud-nav-link mud-ripple">
+                    <MudIcon Icon="@Icons.Material.Filled.Logout" Class="mr-3" /> Log out
+                </button>
+            </form>
+        </Authorized>
+        <NotAuthorized>
+            <MudNavLink Href="Account/Login" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">Log in</MudNavLink>
+            @if (!_hasAccount)
+            {
+                <MudNavLink Href="Account/Register" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.PersonAdd">Create admin account</MudNavLink>
+            }
+        </NotAuthorized>
+    </AuthorizeView>
+</MudNavMenu>
+<MudText Typo="Typo.caption" Class="px-4 pt-4 d-block muted">SyncSentry @AppVersion</MudText>
+<MudText Typo="Typo.caption" Class="px-4 pb-3 d-block muted">Watches mounts and rclone. Does not write to media.</MudText>
+
+@code {
+    private bool _hasAccount = true;
+
+    private static readonly string AppVersion = (typeof(NavMenu).Assembly
+        .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+        .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "dev")
+        .Split('+')[0];
+
+    protected override async Task OnInitializedAsync()
+        => _hasAccount = await Accounts.HasAccountAsync();
+}

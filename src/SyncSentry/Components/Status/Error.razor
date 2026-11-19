@@ -1,0 +1,6 @@
+@page "/Error"
+@layout MainLayout
+@attribute [AllowAnonymous]
+
+<PageTitle>Error · SyncSentry</PageTitle>
+<MudAlert Severity="Severity.Error">Something went wrong. The mount checks and the database are still separate, so a page error does not mean a disk froze the app.</MudAlert>

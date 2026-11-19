@@ -1,0 +1,53 @@
+@page "/Account/Register"
+@inject AdminAccountService Accounts
+
+<PageTitle>Create admin account · SyncSentry</PageTitle>
+
+<div class="acct-wrap">
+    <MudText Typo="Typo.h4" GutterBottom="true">Create the admin account</MudText>
+    @if (_closed)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            An admin account already exists. Sign-ups are closed.
+        </MudAlert>
+        <MudLink Href="Account/Login" Class="mt-3 d-inline-block">Log in</MudLink>
+    }
+    else
+    {
+        <MudText Typo="Typo.body2" Class="mb-4">
+            This first account is the admin for this install. There is no password reset email.
+        </MudText>
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-3">@Error</MudAlert>
+        }
+        <form method="post" action="Account/SignUp" data-enhance="false" class="stack">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <label class="field-label" for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="username" required class="field" />
+            <label class="field-label" for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8" class="field" />
+            <p class="hint">At least 8 characters, with an uppercase letter, a lowercase letter, a number, and a symbol.</p>
+            <label class="field-label" for="confirm">Confirm password</label>
+            <input id="confirm" name="confirm" type="password" autocomplete="new-password" required class="field" />
+            <button type="submit" class="primary">Create account</button>
+        </form>
+        <MudText Class="mt-4">
+            Already created? <MudLink Href="Account/Login">Log in</MudLink>
+        </MudText>
+    }
+</div>
+
+@code {
+    private bool _closed;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    private string? Error { get; set; }
+
+    protected override async Task OnInitializedAsync()
+        => _closed = await Accounts.HasAccountAsync();
+}

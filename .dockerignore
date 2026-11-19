@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/keys/
+.git/
+.github/
+.vs/
+.vscode/
+tests/
+deploy/
+docs/
+agent-tools/
+**/.DS_Store

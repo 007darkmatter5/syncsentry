@@ -1,0 +1,136 @@
+@page "/"
+@inject LiveBoard Board
+@inject IConfiguration Config
+@implements IDisposable
+
+<PageTitle>Mounts · SyncSentry</PageTitle>
+
+<div class="kicker">Mounts</div>
+<MudText Typo="Typo.h4" GutterBottom="true">What the host has mounted</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Space checks run in a separate process and give up if a hard CIFS mount does not answer. SyncSentry never mounts or unmounts anything.</MudText>
+
+@if (AppFlags.Demo(Config))
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4" Variant="Variant.Outlined">Demo data is on. The UNAS mount is pretending to be frozen, and rclone remote control is simulated in this process.</MudAlert>
+}
+
+@{
+    var snapshot = Board.Current;
+    var mounted = snapshot.Mounts.Count(item => item.State == "mounted");
+    var bad = snapshot.Mounts.Count(item => item.State is "unresponsive" or "unmounted");
+    var running = snapshot.Jobs.Count(item => item.Status == "running");
+}
+
+<MudGrid Class="mb-4">
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Mounted</div>
+            <div class="stat-value">@mounted</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Needs attention</div>
+            <div class="stat-value">@bad</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Jobs running</div>
+            <div class="stat-value">@running</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Accept routes</div>
+            <div class="stat-value">@RoutesText(snapshot.Tailscale)</div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@if (snapshot.UpdatedUtc is null)
+{
+    <MudAlert Severity="Severity.Info">The first check has not finished yet.</MudAlert>
+}
+else if (snapshot.Mounts.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning">No mounts are configured, and no mergerfs or CIFS mounts were discovered. Add paths under Settings. Host paths have to be mounted into the container read-only.</MudAlert>
+}
+else
+{
+    <MudGrid>
+        @foreach (var mount in snapshot.Mounts)
+        {
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4 mount-card" Elevation="0" Outlined="true">
+                    <div class="d-flex justify-space-between align-center mb-2">
+                        <MudText Typo="Typo.h6">@mount.Name</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="@ColorFor(mount.State)" Variant="Variant.Filled">@mount.State</MudChip>
+                    </div>
+                    <div class="path mb-1">@mount.Path</div>
+                    <MudText Typo="Typo.body2" Class="muted">@TypeLine(mount)</MudText>
+                    @if (mount.Total is not null)
+                    {
+                        <MudProgressLinear Class="my-2" Color="Color.Primary" Rounded="true" Value="@TextFormat.Percent(mount.Used ?? 0, mount.Total.Value)" />
+                        <MudText Typo="Typo.body2">@TextFormat.Bytes(mount.Used) used · @TextFormat.Bytes(mount.Free) free · @TextFormat.Bytes(mount.Total) total</MudText>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(mount.Detail))
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block mt-1">@mount.Detail</MudText>
+                    }
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+<MudPaper Class="pa-4 mt-4" Elevation="0" Outlined="true">
+    <MudText Typo="Typo.subtitle1">Tailscale</MudText>
+    <MudText Typo="Typo.body2">Accept routes: @RoutesText(snapshot.Tailscale). Source: @snapshot.Tailscale.Source. @(snapshot.Tailscale.Stale ? "The status file is stale." : snapshot.Tailscale.Detail)</MudText>
+</MudPaper>
+
+@code {
+    private PeriodicTimer? _timer;
+
+    protected override void OnInitialized()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static Color ColorFor(string state) => state switch
+    {
+        "mounted" => Color.Success,
+        "unresponsive" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string TypeLine(MountView mount)
+    {
+        var type = string.IsNullOrWhiteSpace(mount.FsType) ? "not mounted" : mount.FsType;
+        var source = string.IsNullOrWhiteSpace(mount.Source) ? "" : " · " + mount.Source;
+        var kind = mount.Configured ? "configured" : "discovered";
+        return type + source + " · " + kind;
+    }
+
+    private static string RoutesText(TailscaleView view) => view.AcceptRoutes switch
+    {
+        true => "on",
+        false => "off",
+        _ => "unknown"
+    };
+}

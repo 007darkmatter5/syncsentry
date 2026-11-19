@@ -1,0 +1,312 @@
+@page "/settings"
+@inject SettingsStore Store
+@inject ISnackbar Snackbar
+@inject DemoInboxHolder DemoHolder
+
+<PageTitle>Settings · SyncSentry</PageTitle>
+
+<div class="kicker">Config</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Settings</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Passwords and the ntfy token are stored encrypted and are not shown again. Leave the password field blank to keep the saved one.</MudText>
+
+@if (!string.IsNullOrEmpty(_notice))
+{
+    <MudAlert Severity="@(_good ? Severity.Success : Severity.Warning)" Class="mb-3">@_notice</MudAlert>
+}
+
+<MudTabs Rounded="true" ApplyEffectsToContainer="true">
+    <MudTabPanel Text="General">
+        @if (_general is not null)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">rclone remote control</MudText>
+                    <MudTextField T="string" @bind-Value="_general.RcUrl" Label="RC URL" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.RcUser" Label="RC user" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.NewRcPassword" Label="@(_general.HasRcPassword ? "New RC password (one is saved)" : "RC password")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_general.ClearRcPassword" Color="Color.Warning">Remove saved RC password</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">ntfy</MudText>
+                    <MudTextField T="string" @bind-Value="_general.NtfyServerUrl" Label="Server URL" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.NtfyTopic" Label="Topic" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.NewNtfyToken" Label="@(_general.HasNtfyToken ? "New access token (one is saved)" : "Access token")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_general.ClearNtfyToken" Color="Color.Warning">Remove saved token</MudSwitch>
+                    <div class="mt-2">
+                        <MudButton Variant="Variant.Outlined" OnClick="TestNtfy">Test</MudButton>
+                    </div>
+                    @if (DemoHolder.Enabled && DemoInbox.Recent.Count > 0)
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block mt-2">Last demo notification: @DemoInbox.Recent[^1].Title</MudText>
+                    }
+                </MudItem>
+                <MudItem xs="12">
+                    <MudText Typo="Typo.subtitle1">Alerts</MudText>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertJobFailed" Color="Color.Primary">Job failed</MudSwitch>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertJobCompleted" Color="Color.Primary">Job completed</MudSwitch>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertMountUnresponsive" Color="Color.Primary">Mount unresponsive</MudSwitch>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertMountUnmounted" Color="Color.Primary">Mount unmounted</MudSwitch>
+                    <MudSwitch T="bool" @bind-Value="_general.AlertAcceptRoutesOff" Color="Color.Primary">Accept-routes off</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">Tailscale and timing</MudText>
+                    <MudTextField T="string" @bind-Value="_general.TailscaleStatusPath" Label="Status file" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.TailscaleSocketPath" Label="Optional socket (leave empty)" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_general.TriggerDirectory" Label="Trigger directory" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudNumericField T="int" @bind-Value="_general.ProbeTimeoutSeconds" Label="Probe timeout seconds" Variant="Variant.Outlined" Class="mt-2" Min="1" Max="15" />
+                    <MudNumericField T="int" @bind-Value="_general.PollSeconds" Label="Poll seconds" Variant="Variant.Outlined" Class="mt-2" Min="5" Max="300" />
+                    <MudNumericField T="int" @bind-Value="_general.LogStaleSeconds" Label="Log stale seconds" Variant="Variant.Outlined" Class="mt-2" Min="30" Max="3600" />
+                    <MudNumericField T="int" @bind-Value="_general.OutboxCacheMinutes" Label="Outbox cache minutes" Variant="Variant.Outlined" Class="mt-2" Min="1" Max="1440" />
+                    <MudNumericField T="int" @bind-Value="_general.ScanSeconds" Label="Scan seconds" Variant="Variant.Outlined" Class="mt-2" Min="5" Max="300" />
+                    <MudNumericField T="int" @bind-Value="_general.ScanMaxFiles" Label="Scan file cap" Variant="Variant.Outlined" Class="mt-2" Min="1000" Max="500000" />
+                </MudItem>
+            </MudGrid>
+            <MudButton Class="mt-3" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveGeneral">Save general</MudButton>
+            <MudText Typo="Typo.subtitle1" Class="mt-6">Recent alerts</MudText>
+            <MudTable Items="_alerts" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent>
+                    <MudTh>When</MudTh>
+                    <MudTh>Kind</MudTh>
+                    <MudTh>Result</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.CreatedUtc.ToLocalTime().ToString("g")</MudTd>
+                    <MudTd>@context.Title</MudTd>
+                    <MudTd>@(context.Delivered ? "sent" : context.Detail)</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudTabPanel>
+    <MudTabPanel Text="Mounts">
+        <MudText Typo="Typo.body2" Class="mb-2 muted">A path counts as mounted only when mountinfo lists that exact path. mergerfs and CIFS mounts are also discovered.</MudText>
+        @foreach (var mount in _mounts)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="3"><MudTextField T="string" @bind-Value="mount.Name" Label="Name" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" md="6"><MudTextField T="string" @bind-Value="mount.Path" Label="Path" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="6" md="2"><MudSwitch T="bool" @bind-Value="mount.Enabled" Color="Color.Primary">On</MudSwitch></MudItem>
+                <MudItem xs="6" md="1"><MudIconButton Icon="@Icons.Material.Filled.Delete" OnClick="() => _mounts.Remove(mount)" /></MudItem>
+            </MudGrid>
+        }
+        <MudButton Class="mt-2" OnClick="AddMount">Add mount</MudButton>
+        <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveMounts">Save mounts</MudButton>
+    </MudTabPanel>
+    <MudTabPanel Text="Logs">
+        @foreach (var log in _logs)
+        {
+            <MudGrid>
+                <MudItem xs="12" md="3"><MudTextField T="string" @bind-Value="log.Name" Label="Name" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="12" md="6"><MudTextField T="string" @bind-Value="log.Path" Label="Path inside the container" Variant="Variant.Outlined" /></MudItem>
+                <MudItem xs="6" md="2"><MudSwitch T="bool" @bind-Value="log.Enabled" Color="Color.Primary">On</MudSwitch></MudItem>
+                <MudItem xs="6" md="1"><MudIconButton Icon="@Icons.Material.Filled.Delete" OnClick="() => _logs.Remove(log)" /></MudItem>
+            </MudGrid>
+        }
+        <MudButton Class="mt-2" OnClick="AddLog">Add log</MudButton>
+        <MudButton Class="mt-2" Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveLogs">Save logs</MudButton>
+    </MudTabPanel>
+    <MudTabPanel Text="Jobs">
+        <MudSelect T="string" Label="Job" Value="_jobKey" ValueChanged="SelectJob" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@("new")">New job</MudSelectItem>
+            @foreach (var job in _jobs)
+            {
+                <MudSelectItem T="string" Value="@job.Id.ToString()">@job.Name</MudSelectItem>
+            }
+        </MudSelect>
+        @if (_job is not null)
+        {
+            <MudTextField T="string" @bind-Value="_job.Name" Label="Name" Variant="Variant.Outlined" Class="mb-2" />
+            <MudSwitch T="bool" @bind-Value="_job.Enabled" Color="Color.Primary">Enabled</MudSwitch>
+            <MudSelect T="string" @bind-Value="_job.StartMode" Label="Start" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem T="string" Value="@("trigger")">Host trigger</MudSelectItem>
+                <MudSelectItem T="string" Value="@("rc")">rclone remote control</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_job.Operation" Label="Operation" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem T="string" Value="@("copy")">copy</MudSelectItem>
+                <MudSelectItem T="string" Value="@("sync")">sync</MudSelectItem>
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="_job.Source" Label="Source" Variant="Variant.Outlined" Class="mt-2" />
+            <MudTextField T="string" @bind-Value="_job.Destination" Label="Destination" Variant="Variant.Outlined" Class="mt-2" />
+            @if (_job.StartMode == "trigger")
+            {
+                <MudTextField T="string" @bind-Value="_job.ScriptKey" Label="Allowlisted script key" Variant="Variant.Outlined" Class="mt-2" HelperText="The host script runs only jobs/&lt;key&gt;.sh. SyncSentry does not run a shell." />
+            }
+            else
+            {
+                <MudTextField T="string" @bind-Value="_job.IncludeRules" Label="Include rules, one per line" Variant="Variant.Outlined" Lines="3" Class="mt-2" />
+                <MudTextField T="string" @bind-Value="_job.ExcludeRules" Label="Exclude rules, one per line" Variant="Variant.Outlined" Lines="3" Class="mt-2" />
+            }
+            <MudSelect T="int?" @bind-Value="_job.LogSourceId" Label="Log source" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem T="int?" Value="@((int?)null)">None</MudSelectItem>
+                @foreach (var log in _logs)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)log.Id)">@log.Name</MudSelectItem>
+                }
+            </MudSelect>
+            <div class="mt-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveJob">Save job</MudButton>
+                @if (_job.Id != Guid.Empty)
+                {
+                    <MudButton Color="Color.Error" OnClick="DeleteJob">Delete</MudButton>
+                }
+            </div>
+        }
+    </MudTabPanel>
+    <MudTabPanel Text="Outbox">
+        <MudSelect T="string" Label="Pair" Value="_pairKey" ValueChanged="SelectPair" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@("new")">New pair</MudSelectItem>
+            @foreach (var pair in _outbox)
+            {
+                <MudSelectItem T="string" Value="@pair.Id.ToString()">@pair.Name</MudSelectItem>
+            }
+        </MudSelect>
+        @if (_pair is not null)
+        {
+            <MudTextField T="string" @bind-Value="_pair.Name" Label="Name" Variant="Variant.Outlined" />
+            <MudTextField T="string" @bind-Value="_pair.SourcePath" Label="Source path" Variant="Variant.Outlined" Class="mt-2" />
+            <MudSelect T="string" @bind-Value="_pair.DestinationKind" Label="Destination kind" Variant="Variant.Outlined" Class="mt-2">
+                <MudSelectItem T="string" Value="@("path")">Mounted path</MudSelectItem>
+                <MudSelectItem T="string" Value="@("remote")">rclone remote</MudSelectItem>
+            </MudSelect>
+            <MudTextField T="string" @bind-Value="_pair.Destination" Label="Destination" Variant="Variant.Outlined" Class="mt-2" />
+            <MudSwitch T="bool" @bind-Value="_pair.Enabled" Color="Color.Primary">Enabled</MudSwitch>
+            <div class="mt-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SavePair">Save pair</MudButton>
+                @if (_pair.Id != 0)
+                {
+                    <MudButton Color="Color.Error" OnClick="DeletePair">Delete</MudButton>
+                }
+            </div>
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private GeneralEdit? _general;
+    private List<MountEdit> _mounts = [];
+    private List<LogEdit> _logs = [];
+    private List<JobEdit> _jobs = [];
+    private List<OutboxEdit> _outbox = [];
+    private List<AlertEvent> _alerts = [];
+    private JobEdit? _job;
+    private OutboxEdit? _pair;
+    private string _jobKey = "new";
+    private string _pairKey = "new";
+    private string? _notice;
+    private bool _good;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _general = await Store.LoadGeneralAsync();
+        _mounts = await Store.LoadMountsAsync();
+        _logs = await Store.LoadLogsAsync();
+        _jobs = await Store.LoadJobsAsync();
+        _outbox = await Store.LoadOutboxAsync();
+        _alerts = (await Store.RecentAlertsAsync()).ToList();
+        _job = _jobs.FirstOrDefault() ?? NewJob();
+        _jobKey = _job.Id == Guid.Empty ? "new" : _job.Id.ToString();
+        _pair = _outbox.FirstOrDefault() ?? NewPair();
+        _pairKey = _pair.Id == 0 ? "new" : _pair.Id.ToString();
+    }
+
+    private async Task SaveGeneral()
+    {
+        if (_general is null)
+            return;
+        await Finish(await Store.SaveGeneralAsync(_general));
+        _general = await Store.LoadGeneralAsync();
+        _alerts = (await Store.RecentAlertsAsync()).ToList();
+    }
+
+    private async Task TestNtfy()
+    {
+        var message = await Store.SendTestAsync();
+        _good = message.StartsWith("Test notification sent", StringComparison.Ordinal);
+        _notice = message;
+        _alerts = (await Store.RecentAlertsAsync()).ToList();
+        Snackbar.Add(message, _good ? Severity.Success : Severity.Warning);
+    }
+
+    private void AddMount() => _mounts.Add(new MountEdit { Name = "Mount", Path = "/mnt/", Enabled = true });
+
+    private async Task SaveMounts() => await Finish(await Store.SaveMountsAsync(_mounts));
+
+    private void AddLog() => _logs.Add(new LogEdit { Name = "log", Path = "/logs/", Enabled = true });
+
+    private async Task SaveLogs()
+    {
+        await Finish(await Store.SaveLogsAsync(_logs));
+        _logs = await Store.LoadLogsAsync();
+    }
+
+    private void SelectJob(string key)
+    {
+        _jobKey = key;
+        _job = key == "new" ? NewJob() : _jobs.FirstOrDefault(item => item.Id.ToString() == key) ?? NewJob();
+    }
+
+    private async Task SaveJob()
+    {
+        if (_job is null)
+            return;
+        await Finish(await Store.SaveJobAsync(_job));
+        _jobs = await Store.LoadJobsAsync();
+    }
+
+    private async Task DeleteJob()
+    {
+        if (_job is null || _job.Id == Guid.Empty)
+            return;
+        await Store.DeleteJobAsync(_job.Id);
+        _jobs = await Store.LoadJobsAsync();
+        _job = NewJob();
+        _jobKey = "new";
+        Note("Job removed.", true);
+    }
+
+    private void SelectPair(string key)
+    {
+        _pairKey = key;
+        _pair = key == "new" ? NewPair() : _outbox.FirstOrDefault(item => item.Id.ToString() == key) ?? NewPair();
+    }
+
+    private async Task SavePair()
+    {
+        if (_pair is null)
+            return;
+        await Finish(await Store.SaveOutboxAsync(_pair));
+        _outbox = await Store.LoadOutboxAsync();
+    }
+
+    private async Task DeletePair()
+    {
+        if (_pair is null || _pair.Id == 0)
+            return;
+        await Store.DeleteOutboxAsync(_pair.Id);
+        _outbox = await Store.LoadOutboxAsync();
+        _pair = NewPair();
+        _pairKey = "new";
+        Note("Pair removed.", true);
+    }
+
+    private async Task Finish(string? error)
+    {
+        if (error is null)
+            Note("Saved.", true);
+        else
+            Note(error, false);
+        await Task.CompletedTask;
+    }
+
+    private void Note(string message, bool good)
+    {
+        _notice = message;
+        _good = good;
+        Snackbar.Add(message, good ? Severity.Success : Severity.Warning);
+    }
+
+    private static JobEdit NewJob() => new() { Name = "New job", StartMode = "trigger", Operation = "copy", ScriptKey = "media-copy", Enabled = true };
+
+    private static OutboxEdit NewPair() => new() { Name = "New pair", DestinationKind = "path", Enabled = true, SourcePath = "/mnt/user/data/media", Destination = "/mnt/remotes/UNASPRO_Media/media" };
+}

@@ -1,0 +1,78 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider @ref="_themeProvider" Theme="_theme" IsDarkMode="_dark" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Dense="false">
+        <MudStaticNavDrawerToggle DrawerId="nav-drawer" @bind-Open="_drawerOpen" Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" />
+        <img src="icon.svg" alt="" width="28" height="28" class="ml-2 mr-2" />
+        <MudText Typo="Typo.h6">SyncSentry</MudText>
+        <MudSpacer />
+        <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small" Icon="@Icons.Material.Filled.Visibility">Watches only</MudChip>
+    </MudAppBar>
+    <MudDrawer id="nav-drawer" @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1" Breakpoint="Breakpoint.Md">
+        <NavMenu />
+    </MudDrawer>
+    <MudMainContent Class="pt-16 pa-4">
+        <MudContainer MaxWidth="MaxWidth.Large" Class="pt-2 pb-10">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    The connection dropped.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">✕</a>
+</div>
+
+@code {
+    private bool _drawerOpen = true;
+    private bool _dark;
+    private MudThemeProvider _themeProvider = default!;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !RendererInfo.IsInteractive)
+            return;
+        _dark = await _themeProvider.GetSystemDarkModeAsync();
+        await _themeProvider.WatchSystemDarkModeAsync(dark =>
+        {
+            _dark = dark;
+            StateHasChanged();
+            return Task.CompletedTask;
+        });
+        StateHasChanged();
+    }
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0b1f33",
+            Secondary = "#b8860b",
+            AppbarBackground = "#0b1f33",
+            AppbarText = "#f4f1ea",
+            Background = "#f4f1ea",
+            Surface = "#fffdf8",
+            DrawerBackground = "#fffdf8",
+            Success = "#0f766e",
+            Warning = "#b45309",
+            Error = "#9f1239",
+            Info = "#1d4e89"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#f0c14a",
+            Secondary = "#e7e1d1",
+            AppbarBackground = "#07131f",
+            Background = "#0c1218",
+            Surface = "#141c26",
+            DrawerBackground = "#101820"
+        },
+        LayoutProperties = new LayoutProperties { DefaultBorderRadius = "14px" }
+    };
+}

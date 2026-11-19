@@ -1,0 +1,21 @@
+# Optional compose file. The Unraid template in unraid/syncsentry.xml is the usual install.
+services:
+  syncsentry:
+    image: ghcr.io/007darkmatter5/syncsentry:latest
+    container_name: syncsentry
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PUID: "99"
+      PGID: "100"
+      TZ: America/Chicago
+      SyncSentry__Rclone__RcUrl: http://192.168.1.10:5572
+      SyncSentry__Rclone__RcUser: syncsentry
+      SyncSentry__Ntfy__ServerUrl: https://ntfy.example
+      SyncSentry__Ntfy__Topic: syncsentry
+    volumes:
+      - /mnt/user/appdata/syncsentry:/config
+      - /mnt/user:/mnt/user:ro,rslave
+      - /mnt/remotes:/mnt/remotes:ro,rslave
+      - /mnt/cache/appdata/mediamanny/logs:/logs/mediamanny:ro

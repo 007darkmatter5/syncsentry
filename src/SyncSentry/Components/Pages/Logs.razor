@@ -1,0 +1,124 @@
+@page "/logs"
+@inject SettingsStore Store
+@inject ILogReader Reader
+@implements IDisposable
+
+<PageTitle>Logs · SyncSentry</PageTitle>
+
+<div class="kicker">rclone logs</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Log viewer</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">The tail of a configured log. Search stays in the browser. Reads of network mounts give up instead of blocking the page.</MudText>
+
+<MudGrid Class="mb-3">
+    <MudItem xs="12" md="4">
+        <MudSelect T="int" Label="Log" Value="_sourceId" ValueChanged="OnSource" Variant="Variant.Outlined">
+            @foreach (var source in _sources)
+            {
+                <MudSelectItem T="int" Value="@source.Id">@source.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudTextField T="string" @bind-Value="_query" Label="Search" Variant="Variant.Outlined" Immediate="true" />
+    </MudItem>
+    <MudItem xs="12" md="4">
+        <MudSelect T="string" @bind-Value="_level" Label="Level" Variant="Variant.Outlined">
+            <MudSelectItem T="string" Value="@("all")">All</MudSelectItem>
+            <MudSelectItem T="string" Value="@("ERROR")">Errors</MudSelectItem>
+            <MudSelectItem T="string" Value="@("WARNING")">Warnings</MudSelectItem>
+            <MudSelectItem T="string" Value="@("INFO")">Info</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+</MudGrid>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-3">@_error</MudAlert>
+}
+else
+{
+    <div class="path muted mb-2">@_path</div>
+    <div class="log-view">@foreach (var line in Visible())
+    {
+        <div class="@(line.Contains(" ERROR ", StringComparison.OrdinalIgnoreCase) ? "err" : "info")">@line</div>
+    }</div>
+}
+
+@code {
+    private List<LogEdit> _sources = [];
+    private int _sourceId;
+    private string _path = "";
+    private string _text = "";
+    private string? _error;
+    private string _query = "";
+    private string _level = "all";
+    private PeriodicTimer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _sources = await Store.LoadLogsAsync();
+        if (_sources.Count > 0)
+            await OnSource(_sources[0].Id);
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Loop();
+    }
+
+    private async Task OnSource(int id)
+    {
+        _sourceId = id;
+        var source = _sources.FirstOrDefault(item => item.Id == id);
+        _path = source?.Path ?? "";
+        await Read();
+    }
+
+    private async Task Read()
+    {
+        if (string.IsNullOrWhiteSpace(_path))
+        {
+            _error = "No log is configured.";
+            return;
+        }
+
+        var read = await Reader.ReadAsync(_path, 262_144, TimeSpan.FromSeconds(3));
+        if (!read.Ok)
+        {
+            _error = read.Error;
+            _text = "";
+            return;
+        }
+
+        _error = null;
+        _text = read.Text ?? "";
+    }
+
+    private IEnumerable<string> Visible()
+    {
+        foreach (var raw in _text.Split('\n'))
+        {
+            if (raw.Length == 0)
+                continue;
+            if (_level != "all" && raw.IndexOf(" " + _level + " ", StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+            if (!string.IsNullOrWhiteSpace(_query) && raw.IndexOf(_query, StringComparison.OrdinalIgnoreCase) < 0)
+                continue;
+            yield return raw;
+        }
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+            {
+                await Read();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

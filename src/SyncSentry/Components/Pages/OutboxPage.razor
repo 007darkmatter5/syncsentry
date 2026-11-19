@@ -1,0 +1,130 @@
+@page "/outbox"
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject SettingsStore Store
+@inject OutboxService Outbox
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Outbox · SyncSentry</PageTitle>
+
+<div class="kicker">Waiting</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Outbox</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Files on the source that are missing, a different size, or newer than the destination. Results are cached. A scan that hits a frozen mount is abandoned.</MudText>
+
+@foreach (var pair in _pairs)
+{
+    var sample = Sample(pair.SampleJson);
+    <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true">
+        <div class="d-flex justify-space-between align-center flex-wrap gap-2">
+            <div>
+                <MudText Typo="Typo.h6">@pair.Name</MudText>
+                <div class="path">@pair.SourcePath → @pair.Destination</div>
+            </div>
+            <div>
+                <MudChip T="string" Size="Size.Small">@pair.Status</MudChip>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy" OnClick="() => Refresh(pair.Id)">Refresh</MudButton>
+            </div>
+        </div>
+        <MudText Typo="Typo.body2" Class="mt-2">
+            @pair.PendingCount files · @TextFormat.Bytes(pair.PendingBytes)
+            @if (pair.LastScanUtc is not null)
+            {
+                <span class="muted"> · scanned @pair.LastScanUtc.Value.ToLocalTime().ToString("g")</span>
+            }
+        </MudText>
+        @if (!string.IsNullOrWhiteSpace(pair.Error))
+        {
+            <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">@pair.Error</MudAlert>
+        }
+        @if (sample.Count > 0)
+        {
+            <MudTable Items="sample" Dense="true" Hover="true" Elevation="0" Class="mt-2">
+                <HeaderContent>
+                    <MudTh>Path</MudTh>
+                    <MudTh>Size</MudTh>
+                    <MudTh>Why</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Path"><span class="path">@context.Path</span></MudTd>
+                    <MudTd DataLabel="Size">@TextFormat.Bytes(context.Size)</MudTd>
+                    <MudTd DataLabel="Why">@context.Reason</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+}
+
+@if (_pairs.Count == 0)
+{
+    <MudAlert Severity="Severity.Info">No outbox pairs yet. Add one in Settings.</MudAlert>
+}
+
+@code {
+    private List<OutboxPair> _pairs = [];
+    private bool _busy;
+    private PeriodicTimer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+            {
+                await Reload();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task Reload()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _pairs = await db.OutboxPairs.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+    }
+
+    private async Task Refresh(int id)
+    {
+        _busy = true;
+        try
+        {
+            await Store.RequestRefreshAsync(id);
+            await Outbox.ScanAsync(id, CancellationToken.None);
+            await Reload();
+            Snackbar.Add("Outbox refreshed.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Refresh failed (" + ex.GetType().Name + ").", Severity.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static List<PendingFile> Sample(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<PendingFile>>(json) ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

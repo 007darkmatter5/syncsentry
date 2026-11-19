@@ -1,0 +1,161 @@
+@page "/jobs"
+@inject LiveBoard Board
+@inject SettingsStore Store
+@inject RunNowService RunNow
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Jobs · SyncSentry</PageTitle>
+
+<div class="kicker">rclone</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Jobs</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Running transfers come from rclone remote control when it answers, and from log files when a job was started outside it. Run now only starts a saved definition.</MudText>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <MudAlert Severity="@(_ok ? Severity.Success : Severity.Warning)" Class="mb-3">@_message</MudAlert>
+}
+
+<MudText Typo="Typo.h6" Class="mb-2">Configured</MudText>
+<MudTable Items="_jobs" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0" Class="mb-6">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Start</MudTh>
+        <MudTh>State</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">
+            <div>@context.Name</div>
+            <div class="path muted">@context.Source → @context.Destination</div>
+        </MudTd>
+        <MudTd DataLabel="Start">@context.StartMode</MudTd>
+        <MudTd DataLabel="State">@StateFor(context)</MudTd>
+        <MudTd>
+            @if (_confirm == context.Id)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" OnClick="() => Start(context.Id)">Confirm</MudButton>
+                <MudButton Size="Size.Small" OnClick="() => _confirm = null">Cancel</MudButton>
+            }
+            else
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="@(!context.Enabled)" OnClick="() => _confirm = context.Id">Run now</MudButton>
+            }
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+<MudText Typo="Typo.h6" Class="mb-2">Activity</MudText>
+@if (Board.Current.Jobs.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">Nothing is running. @(Board.Current.RcReachable ? "rclone remote control answered." : Board.Current.RcError ?? "rclone remote control has not answered yet.")</MudAlert>
+}
+else
+{
+    @foreach (var job in Board.Current.Jobs)
+    {
+        <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true">
+            <div class="d-flex justify-space-between align-center">
+                <MudText Typo="Typo.subtitle1">@job.Name</MudText>
+                <MudChip T="string" Size="Size.Small" Color="@StatusColor(job.Status)">@job.Status</MudChip>
+            </div>
+            <MudText Typo="Typo.caption" Class="muted">@job.Origin</MudText>
+            <MudProgressLinear Class="my-2" Rounded="true" Color="Color.Primary" Value="@TextFormat.Percent(job.Bytes, job.TotalBytes)" />
+            <MudText Typo="Typo.body2">
+                @TextFormat.Bytes(job.Bytes) / @TextFormat.Bytes(job.TotalBytes)
+                · @job.Files / @job.TotalFiles files
+                · @TextFormat.Speed(job.Speed)
+                · ETA @TextFormat.Eta(job.EtaSeconds)
+                · @job.Errors errors
+            </MudText>
+            @if (!string.IsNullOrWhiteSpace(job.LastError))
+            {
+                <MudText Typo="Typo.body2" Color="Color.Error">@job.LastError</MudText>
+            }
+            @foreach (var file in job.Transferring)
+            {
+                <div class="path">@file</div>
+            }
+        </MudPaper>
+    }
+}
+
+<MudText Typo="Typo.h6" Class="mt-4 mb-2">History</MudText>
+<MudTable Items="_history" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm" Elevation="0">
+    <HeaderContent>
+        <MudTh>Name</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Transferred</MudTh>
+        <MudTh>Updated</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Name">@context.Name</MudTd>
+        <MudTd DataLabel="Status">@context.Status</MudTd>
+        <MudTd DataLabel="Transferred">@TextFormat.Bytes(context.BytesTransferred)</MudTd>
+        <MudTd DataLabel="Updated">@context.UpdatedUtc.ToLocalTime().ToString("g")</MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+    private List<JobEdit> _jobs = [];
+    private List<JobRun> _history = [];
+    private Guid? _confirm;
+    private string? _message;
+    private bool _ok;
+    private PeriodicTimer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+            {
+                await Reload();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task Reload()
+    {
+        _jobs = await Store.LoadJobsAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _history = await db.JobRuns.AsNoTracking().OrderByDescending(item => item.Id).Take(40).ToListAsync();
+    }
+
+    private async Task Start(Guid id)
+    {
+        _confirm = null;
+        var result = await RunNow.StartAsync(id, CancellationToken.None);
+        _ok = result.Ok;
+        _message = result.Message;
+        Snackbar.Add(result.Message, result.Ok ? Severity.Success : Severity.Warning);
+    }
+
+    private string StateFor(JobEdit job)
+    {
+        var live = Board.Current.Jobs.FirstOrDefault(item => item.DefinitionId == job.Id);
+        return live?.Status ?? (job.Enabled ? "idle" : "disabled");
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        "running" => Color.Info,
+        "completed" => Color.Success,
+        "failed" => Color.Error,
+        _ => Color.Warning
+    };
+
+    public void Dispose() => _timer?.Dispose();
+}
