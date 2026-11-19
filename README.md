@@ -146,6 +146,8 @@ docker run -d --name syncsentry \
 
 Add `:rslave` (or the compose `rslave` flag) on the `/mnt/user` and `/mnt/remotes` mounts.
 
+Pushes to `main` publish `latest`, `sha-<12>`, and `0.1.0.<run>` from the `VERSION` file. Pushes to `beta` publish `beta` and `0.1.0.<run>-beta`. Docs, the license, and `unraid/` do not publish a new image. The beta template is [`unraid/syncsentry-beta.xml`](unraid/syncsentry-beta.xml): container name `SyncSentry-Beta`, image `:beta`, appdata `/mnt/user/appdata/syncsentry-beta`, host port `8081`, so it can sit next to the stable container. Add it from Docker, Add Container, with that template file.
+
 ## Development
 
 .NET 10 SDK.

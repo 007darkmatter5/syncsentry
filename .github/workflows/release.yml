@@ -1,12 +1,16 @@
 name: Release
 
-# Push to main: test, smoke-test, publish ghcr.io/007darkmatter5/syncsentry:latest and :sha-<commit>.
-# Tag v* (v1.2.3): the same, published as the semver tag (1.2.3).
-# Publishing is limited to github.com/007darkmatter5/syncsentry.
+# beta branch -> image tags "beta" and "<version>-beta"
+# main branch  -> image tags "latest", "sha-<12>", and "<version>"
+# a v* tag     -> that semver tag only
+# Versions are <VERSION file>.<run number>, so every release is unique and increasing.
+# Docs, the license, and the Unraid template don't change the image.
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
     tags: ["v*"]
+    paths-ignore: ['**.md', 'LICENSE', 'docs/**', 'unraid/**']
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -47,21 +51,29 @@ jobs:
             exit 1
           fi
 
-      - name: Work out image tags
+      - name: Work out version and channel
         id: meta
         run: |
           sha="sha-${GITHUB_SHA::12}"
+          base=$(tr -d '[:space:]' < VERSION)
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             echo "tags=$IMAGE:$version" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "channel=tag" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_REF_NAME" = "main" ]; then
+            # 0.1.0.<run> is a valid NuGet version. sha-<commit> is not (NETSDK1018).
+            version="$base.$GITHUB_RUN_NUMBER"
+            echo "tags=$IMAGE:$version,$IMAGE:latest,$IMAGE:$sha" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
           else
-            # Image tags stay latest and sha-<12>. -p:Version must be a NuGet version;
-            # "sha-<commit>" is rejected with NETSDK1018.
-            base=$(tr -d '[:space:]' < VERSION)
-            echo "tags=$IMAGE:latest,$IMAGE:$sha" >> "$GITHUB_OUTPUT"
-            echo "version=${base}.0-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            version="$base.$GITHUB_RUN_NUMBER-beta"
+            echo "tags=$IMAGE:$version,$IMAGE:beta" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
           fi
+          echo "Releasing $version from $GITHUB_REF_NAME"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -74,7 +86,7 @@ jobs:
           tags: syncsentry:smoke
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-          cache-from: type=gha,scope=release
+          cache-from: type=gha,scope=${{ github.ref_name }}
 
       - name: Smoke test
         run: |
@@ -123,8 +135,8 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=release
-          cache-to: type=gha,mode=max,scope=release
+          cache-from: type=gha,scope=${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
 
       - name: Make the package public when the token can
         env:
