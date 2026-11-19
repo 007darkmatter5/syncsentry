@@ -75,6 +75,8 @@ public class SetupTests
         Assert.DoesNotContain("/mnt/user/appdata/syncsentry\"", script, StringComparison.Ordinal);
         Assert.Contains("write_tailscale", script, StringComparison.Ordinal);
         Assert.Contains("rclone copy", SetupGuide.ExampleCopyScript(), StringComparison.Ordinal);
+        Assert.Equal(Normalize(RepoFile("deploy/unraid/syncsentry-host.sh")), Normalize(SetupGuide.HelperScript(SetupGuide.DefaultAppdata)));
+        Assert.Equal(Normalize(RepoFile("deploy/unraid/jobs/media-copy.sh.example")), Normalize(SetupGuide.ExampleCopyScript()));
         Assert.Contains("scriptKey=movies", SetupGuide.AllowlistNote("movies"), StringComparison.Ordinal);
         Assert.Equal("rclone answered (v1.76.0).", SetupGuide.VersionGuidance(RcAccess.Ok, "v1.76.0"));
         Assert.Contains("refused", SetupGuide.VersionGuidance(RcAccess.Unauthorized, null), StringComparison.OrdinalIgnoreCase);
@@ -141,6 +143,17 @@ public class SetupTests
         var setting = await again.Settings.SingleAsync();
         Assert.Equal("enc:keep-me", setting.RcPasswordProtected);
         Assert.Equal("http://192.168.1.10:5572", setting.RcUrl);
+    }
+
+    private static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static string RepoFile(string relative)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, relative)))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return File.ReadAllText(Path.Combine(dir!.FullName, relative));
     }
 
     private sealed class Factory(DbContextOptions<ApplicationDbContext> options) : IDbContextFactory<ApplicationDbContext>

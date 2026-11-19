@@ -26,10 +26,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\deploy\unraid\syncsentry-host.sh">
+    <EmbeddedResource Include="Setup\syncsentry-host.sh">
       <LogicalName>SyncSentry.Setup.syncsentry-host.sh</LogicalName>
     </EmbeddedResource>
-    <Content Include="..\..\deploy\unraid\jobs\media-copy.sh.example" Link="setup/media-copy.txt" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Setup\media-copy.txt">
+      <LogicalName>SyncSentry.Setup.media-copy.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

@@ -200,10 +200,7 @@ public static class SetupGuide
     }
 
     public static string ExampleCopyScript()
-    {
-        var path = Path.Combine(AppContext.BaseDirectory, "setup", "media-copy.txt");
-        return File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
-    }
+        => ReadResource("SyncSentry.Setup.media-copy.txt");
 
     public static string AllowlistNote(string key)
         => "Create this file on the Unraid host and make it executable:\n"

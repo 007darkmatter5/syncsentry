@@ -1,0 +1,17 @@
+#!/bin/bash
+# Example allowlisted job. Copy to:
+#   /boot/config/plugins/user.scripts/scripts/syncsentry-jobs/media-copy.sh
+# and chmod +x it.
+#
+# SyncSentry never runs this file. The host helper runs it when the script key is media-copy.
+# Paths here are host paths. The log path is the one the existing MediaManny copy already uses.
+
+set -euo pipefail
+exec /usr/sbin/rclone copy \
+    /mnt/user/data/media \
+    /mnt/remotes/UNASPRO_Media/media \
+    --log-file /mnt/cache/appdata/mediamanny/logs/initial-copy.log \
+    --log-level INFO \
+    --stats 60s \
+    --stats-one-line \
+    --transfers 4
