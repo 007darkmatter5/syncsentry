@@ -4,6 +4,7 @@ name: Release
 # main branch  -> image tags "latest", "sha-<12>", and "<version>"
 # a v* tag     -> that semver tag only
 # Versions are <VERSION file>.<run number>, so every release is unique and increasing.
+# Creating the beta branch at main's commit does not change a file, so this line keeps the first beta publish from being skipped.
 # Docs, the license, and the Unraid template don't change the image.
 on:
   push:
