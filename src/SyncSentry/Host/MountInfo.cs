@@ -2,7 +2,13 @@ using System.Text.RegularExpressions;
 
 namespace SyncSentry.Host;
 
-public sealed record MountEntry(string MountPoint, string FsType, string Source);
+public sealed record MountEntry(
+    string MountPoint,
+    string FsType,
+    string Source,
+    string Options = "",
+    string Root = "/",
+    bool ReadOnly = false);
 
 public static partial class MountInfo
 {
@@ -37,7 +43,9 @@ public static partial class MountInfo
         if (mountPoint.Length == 0 || mountPoint[0] != '/')
             return null;
 
-        return new MountEntry(mountPoint, right[0], SanitizeSource(right[1]));
+        var options = left[5];
+        var root = left[3];
+        return new MountEntry(mountPoint, right[0], SanitizeSource(right[1]), options, root, OptionsAreReadOnly(options));
     }
 
     /// <summary>
@@ -81,6 +89,19 @@ public static partial class MountInfo
             if (IsDiscoveredType(mount.FsType))
                 yield return mount;
         }
+    }
+
+    public static bool OptionsAreReadOnly(string? options)
+    {
+        if (string.IsNullOrWhiteSpace(options))
+            return false;
+        foreach (var token in options.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (token.Equals("ro", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     public static bool IsDiscoveredType(string? fsType)

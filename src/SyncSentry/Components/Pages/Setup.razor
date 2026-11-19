@@ -1,0 +1,584 @@
+@page "/setup"
+@attribute [AllowAnonymous]
+@inject SetupService Wizard
+@inject ISnackbar Snackbar
+@inject IJSRuntime Js
+@inject NavigationManager Nav
+
+<PageTitle>Setup · SyncSentry</PageTitle>
+
+<div class="kicker">First run</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Set up SyncSentry</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">This walks through the folders, rclone, and alerts. SyncSentry only watches. It writes settings under its own appdata and shows text for you to paste. It does not edit files on the Unraid host.</MudText>
+
+@if (!_ready)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (!_signedIn)
+{
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText Typo="Typo.h6" GutterBottom="true">1. Admin account</MudText>
+        @if (!_hasAccount)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">The first account is the admin. Sign-up closes after this. There is no password-reset email.</MudText>
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3">@Error</MudAlert>
+            }
+            <form method="post" action="Account/SignUp" data-enhance="false" class="stack">
+                <AntiforgeryToken />
+                <input type="hidden" name="returnUrl" value="/setup?step=2" />
+                <label class="field-label" for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="username" required class="field" />
+                <label class="field-label" for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="new-password" required minlength="8" class="field" />
+                <p class="hint">At least 8 characters, with an uppercase letter, a lowercase letter, a number, and a symbol.</p>
+                <label class="field-label" for="confirm">Confirm password</label>
+                <input id="confirm" name="confirm" type="password" autocomplete="new-password" required class="field" />
+                <button type="submit" class="primary">Create account and continue</button>
+            </form>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">An admin account already exists. Log in to continue setup.</MudText>
+            @if (Error == "1")
+            {
+                <MudAlert Severity="Severity.Error" Class="mb-3">The email or password is wrong.</MudAlert>
+            }
+            <form method="post" action="Account/SignIn" data-enhance="false" class="stack">
+                <AntiforgeryToken />
+                <input type="hidden" name="returnUrl" value="/setup?step=2" />
+                <label class="field-label" for="email">Email</label>
+                <input id="email" name="email" type="email" autocomplete="username" required class="field" />
+                <label class="field-label" for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required class="field" />
+                <button type="submit" class="primary">Log in and continue</button>
+            </form>
+        }
+    </MudPaper>
+}
+else
+{
+    <MudStepper @ref="_stepper" @bind-ActiveIndex="Index" NonLinear="true" ShowSkip="false" ShowResetButton="false" ScrollableNavigation="true" OnPreviewInteraction="Preview" CompletedStepColor="Color.Success">
+        <ChildContent>
+            <MudStep Title="Account">
+                <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Dense="true">You're signed in as @_email. This account is the admin.</MudAlert>
+            </MudStep>
+            <MudStep Title="Folders">
+                <MudText Typo="Typo.body2" Class="mb-3">SyncSentry has to see your shares, and it has to be forbidden from writing to them.</MudText>
+                @foreach (var check in new[] { _env.UserShares, _env.Remotes })
+                {
+                    <div class="kv" @key="@("need-" + check.Path)">
+                        <span class="status-badge @(check.Ok ? "badge-ok" : "badge-error")">@(check.Ok ? "Ready" : "Fix")</span>
+                        <span class="kv-key">@check.Title</span>
+                        <span class="kv-val">
+                            <span class="path">@check.Path</span>
+                            <div>@(check.Ok ? "Mapped read-only." : check.Fix)</div>
+                        </span>
+                    </div>
+                }
+                <MudText Typo="Typo.subtitle2" Class="mt-4">SMB / CIFS</MudText>
+                @if (_env.Smb.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="muted">No remote SMB mounts were visible.</MudText>
+                }
+                @foreach (var row in _env.Smb)
+                {
+                    <div class="kv" @key="@("smb-" + row.Path)">
+                        <span class="status-badge @(row.ReadOnly ? "badge-ok" : "badge-wait")">@(row.ReadOnly ? "Read only" : "Writable")</span>
+                        <span class="kv-key">@row.Name</span>
+                        <MudTooltip Text="@row.Source"><span class="kv-val path">@row.Path</span></MudTooltip>
+                    </div>
+                }
+                <MudText Typo="Typo.subtitle2" Class="mt-3">mergerfs pools</MudText>
+                @if (_env.Pools.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="muted">No mergerfs pool was visible.</MudText>
+                }
+                @foreach (var row in _env.Pools)
+                {
+                    <div class="kv" @key="@("pool-" + row.Path)">
+                        <span class="status-badge @(row.ReadOnly ? "badge-ok" : "badge-wait")">@(row.ReadOnly ? "Read only" : "Writable")</span>
+                        <span class="kv-key">@row.Name</span>
+                        <MudTooltip Text="@row.Source"><span class="kv-val path">@row.Path</span></MudTooltip>
+                    </div>
+                }
+                <MudText Typo="Typo.subtitle2" Class="mt-3">Array shares</MudText>
+                @if (_env.Shares.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="muted">The user share was not visible.</MudText>
+                }
+                @foreach (var row in _env.Shares)
+                {
+                    <div class="kv" @key="@("share-" + row.Path)">
+                        <span class="status-badge @(row.ReadOnly ? "badge-ok" : "badge-wait")">@(row.ReadOnly ? "Read only" : "Writable")</span>
+                        <span class="kv-key">@row.Name</span>
+                        <MudTooltip Text="@row.Source"><span class="kv-val path">@row.Path</span></MudTooltip>
+                    </div>
+                }
+                <MudExpansionPanels Class="mt-3">
+                    <MudExpansionPanel Text="Why these two paths">
+                        <MudText Typo="Typo.body2">The template maps host <span class="path">/mnt/user</span> and <span class="path">/mnt/remotes</span> into the container with the same paths, Read only, propagation rslave. rslave lets mergerfs and CIFS mounts that appear later show up here. A folder left behind on a local disk does not count as mounted.</MudText>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudStep>
+            <MudStep Title="rclone">
+                <MudText Typo="Typo.body2" Class="mb-3">rclone can tell SyncSentry which file is moving, from where, and how fast. Without it, SyncSentry still reads the log.</MudText>
+                <MudTextField @bind-Value="_rcUrl" Label="Address" Variant="Variant.Outlined" HelperText="On the default Docker bridge this is http://172.17.0.1:5572. On a custom network, use this server's LAN address." />
+                <MudTextField @bind-Value="_rcUser" Label="Username" Variant="Variant.Outlined" Class="mt-3" />
+                <MudTextField @bind-Value="_existingPassword" Label="@(_hasPassword ? "Existing password (leave blank to keep the saved one)" : "Password you already use")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-3" />
+                <div class="mt-3 d-flex flex-wrap gap-2">
+                    <MudButton Variant="Variant.Outlined" OnClick="Generate">Generate a password</MudButton>
+                    <MudButton Variant="Variant.Outlined" OnClick="TestRclone">Test connection</MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="SkipRclone">Use logs only</MudButton>
+                </div>
+                @if (!string.IsNullOrEmpty(_generated))
+                {
+                    <MudAlert Severity="Severity.Info" Class="mt-3" Variant="Variant.Outlined">
+                        Copy this password now. It is saved when you press Next, and it will not be shown again.
+                        <div class="d-flex align-center gap-2 mt-2">
+                            <span class="path">@_generated</span>
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" OnClick="() => Copy(_generated)">Copy</MudButton>
+                        </div>
+                    </MudAlert>
+                }
+                else if (_hasPassword)
+                {
+                    <MudText Typo="Typo.caption" Class="mt-2 d-block muted">A password is already saved and is not shown.</MudText>
+                }
+                @if (!string.IsNullOrEmpty(_testMessage))
+                {
+                    <MudAlert Severity="@(_testOk ? Severity.Success : Severity.Warning)" Class="mt-3" Variant="Variant.Outlined">@_testMessage</MudAlert>
+                }
+                <MudText Typo="Typo.subtitle2" Class="mt-4">Add this to the rclone command or script</MudText>
+                <div class="d-flex justify-end"><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Copy(Snippet)">Copy</MudButton></div>
+                <pre class="copy-block">@Snippet</pre>
+                <MudExpansionPanels Class="mt-2">
+                    <MudExpansionPanel Text="Example copy script">
+                        <MudText Typo="Typo.body2" Class="mb-2">This is the sample job from the repository. Paths are host paths. Put the flags above on the rclone line, and keep the password in the environment, not in the script file if you can avoid it.</MudText>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Copy(_exampleScript)">Copy</MudButton>
+                        <pre class="copy-block">@_exampleScript</pre>
+                    </MudExpansionPanel>
+                    <MudExpansionPanel Text="What the flags mean">
+                        <MudText Typo="Typo.body2"><span class="path">--rc</span> turns on remote control in that rclone process. <span class="path">--rc-addr 172.17.0.1:5572</span> is the Docker bridge address of the host, which is where this container looks. <span class="path">--rc-enable-metrics=false</span> keeps the extra metrics endpoint off. <span class="path">RCLONE_RC_USER</span> and <span class="path">RCLONE_RC_PASS</span> are the login. Do not add <span class="path">--rc-no-auth</span>.</MudText>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudStep>
+            <MudStep Title="Helper">
+                <MudText Typo="Typo.body2" Class="mb-3">A one-minute host script records whether Tailscale is accepting subnet routes, and it runs a copy only when you press Run now. Install the User Scripts plugin from Community Applications, or read the <MudLink Href="@SetupGuide.UserScriptsHelp" Target="_blank">forum thread</MudLink>.</MudText>
+                <MudTextField @bind-Value="_appdata" Label="Host appdata path" Variant="Variant.Outlined" HelperText="Where the template stores this container's appdata. The script writes host/tailscale.json there." />
+                <MudText Typo="Typo.body2" Class="mt-3">Schedule: custom <span class="path">* * * * *</span> (every minute). Paste the script below. SyncSentry does not install it for you.</MudText>
+                <div class="d-flex justify-end"><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => Copy(HelperText)">Copy</MudButton></div>
+                <pre class="copy-block">@HelperText</pre>
+                <div class="mt-3 d-flex align-center gap-3">
+                    <MudButton Variant="Variant.Outlined" Disabled="_checking" OnClick="CheckHelper">@(_checking ? "Checking…" : "Check")</MudButton>
+                    @if (_checking)
+                    {
+                        <MudText Typo="Typo.caption">Waiting for the helper to write the status file (@_waited s).</MudText>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_helper.Summary))
+                {
+                    <MudAlert Severity="@LevelSeverity(_helper.Level)" Class="mt-3" Variant="Variant.Outlined">
+                        @_helper.Summary
+                        <div class="mt-1">@_helper.Detail</div>
+                    </MudAlert>
+                }
+            </MudStep>
+            <MudStep Title="Copies">
+                <MudText Typo="Typo.body2" Class="mb-3">Each copy is a source folder and a destination folder. The dashboard keeps a card for it, including after the copy finishes.</MudText>
+                @foreach (var pair in _pairs)
+                {
+                    <MudPaper Class="pa-3 mb-3" Elevation="0" Outlined="true" @key="pair.Id">
+                        <MudTextField @bind-Value="pair.Name" Label="Name" Variant="Variant.Outlined" HelperText="For example Movies." />
+                        @if (_places.Count > 0)
+                        {
+                            <MudSelect T="string" Class="mt-3" Label="Pick a source" Value="pair.Source" ValueChanged="@(value => pair.Source = value)" Variant="Variant.Outlined">
+                                @foreach (var place in _places)
+                                {
+                                    <MudSelectItem T="string" Value="@place.Path">@place.Name — @place.Path</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                        <MudTextField @bind-Value="pair.Source" Label="Source path" Variant="Variant.Outlined" Class="mt-3" />
+                        @if (_places.Count > 0)
+                        {
+                            <MudSelect T="string" Class="mt-3" Label="Pick a destination" Value="pair.Destination" ValueChanged="@(value => pair.Destination = value)" Variant="Variant.Outlined">
+                                @foreach (var place in _places)
+                                {
+                                    <MudSelectItem T="string" Value="@place.Path">@place.Name — @place.Path</MudSelectItem>
+                                }
+                            </MudSelect>
+                        }
+                        <MudTextField @bind-Value="pair.Destination" Label="Destination path" Variant="Variant.Outlined" Class="mt-3" />
+                        <MudTextField @bind-Value="pair.ScriptKey" Label="Run-now script name (optional)" Variant="Variant.Outlined" Class="mt-3" HelperText="Lowercase, for example movies. Leave blank if rclone starts the copy itself." />
+                        @{
+                            var scriptKey = (pair.ScriptKey ?? "").Trim();
+                        }
+                        @if (Rules.ScriptKey(scriptKey))
+                        {
+                            <MudAlert Severity="Severity.Info" Class="mt-3" Variant="Variant.Outlined" Dense="true">
+                                The helper only runs a script that is already in its allowlist folder. Add this file yourself:
+                                <pre class="copy-block">@SetupGuide.AllowlistNote(scriptKey)</pre>
+                            </MudAlert>
+                        }
+                        <MudButton Class="mt-2" Variant="Variant.Text" Color="Color.Error" OnClick="() => _pairs.Remove(pair)">Remove</MudButton>
+                    </MudPaper>
+                }
+                <MudButton Variant="Variant.Outlined" OnClick="AddPair">Add a copy</MudButton>
+            </MudStep>
+            <MudStep Title="Alerts">
+                <MudText Typo="Typo.body2" Class="mb-3">ntfy sends a phone notification when something changes. Leave the topic blank to skip alerts.</MudText>
+                <MudTextField @bind-Value="_ntfyUrl" Label="ntfy server" Variant="Variant.Outlined" />
+                <MudTextField @bind-Value="_ntfyTopic" Label="Topic" Variant="Variant.Outlined" Class="mt-3" />
+                <MudTextField @bind-Value="_ntfyToken" Label="@(_hasToken ? "New access token (one is saved and is not shown)" : "Access token (optional)")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-3" />
+                <MudSwitch @bind-Value="_alertFailed" Color="Color.Primary">Copy failed</MudSwitch>
+                <MudSwitch @bind-Value="_alertStale" Color="Color.Primary">Mount stale</MudSwitch>
+                <MudSwitch @bind-Value="_alertDown" Color="Color.Primary">Mount disconnected</MudSwitch>
+                <MudSwitch @bind-Value="_alertDone" Color="Color.Primary">Copy finished</MudSwitch>
+                <MudSwitch @bind-Value="_alertRoutes" Color="Color.Primary">Tailscale routes off</MudSwitch>
+                <MudButton Class="mt-2" Variant="Variant.Outlined" OnClick="SendTest">Send test</MudButton>
+                <MudExpansionPanels Class="mt-3">
+                    <MudExpansionPanel Text="About the token">
+                        <MudText Typo="Typo.body2">The token is stored encrypted and is never written back into this form. A public topic on ntfy.sh does not need one. A private topic does.</MudText>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudStep>
+            <MudStep Title="Speed">
+                <MudText Typo="Typo.body2" Class="mb-3">Optional. This is the only control that tells rclone to slow down. Off leaves rclone unlimited.</MudText>
+                <MudSelect T="string" @bind-Value="_speedMode" Label="Speed limit" Variant="Variant.Outlined">
+                    <MudSelectItem T="string" Value="@("off")">Off</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("custom")">Custom</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("schedule")">Schedule</MudSelectItem>
+                </MudSelect>
+                <MudNumericField T="double" @bind-Value="_speedCustom" Label="Custom MB/s" Variant="Variant.Outlined" Class="mt-3" Min="0" Max="10000" />
+                <MudText Typo="Typo.caption" Class="muted">A schedule uses this container's time zone. 7 to 23 means limited from 07:00 through 22:59, then unlimited. rclone treats 1M as 1,048,576 bytes per second.</MudText>
+                <MudNumericField T="double" @bind-Value="_speedSchedule" Label="Limited MB/s" Variant="Variant.Outlined" Class="mt-3" Min="0" Max="10000" />
+                <MudNumericField T="int" @bind-Value="_speedStart" Label="Limit starts (hour 0-23)" Variant="Variant.Outlined" Class="mt-3" Min="0" Max="23" />
+                <MudNumericField T="int" @bind-Value="_speedEnd" Label="Limit ends (hour 0-24)" Variant="Variant.Outlined" Class="mt-3" Min="0" Max="24" />
+            </MudStep>
+            <MudStep Title="Review">
+                @foreach (var item in _review)
+                {
+                    <div class="kv" @key="item.Step">
+                        <span class="status-badge @LevelClass(item.Level)">@LevelWord(item.Level)</span>
+                        <span class="kv-key">@item.Name</span>
+                        <span class="kv-val">@item.Detail</span>
+                    </div>
+                }
+                <MudText Typo="Typo.body2" Class="mt-3">Finish leaves these settings in place. You can open any step again from Settings, Setup checklist.</MudText>
+            </MudStep>
+        </ChildContent>
+        <ActionContent>
+            @if (Index > 0)
+            {
+                <MudButton Variant="Variant.Text" OnClick="Back">Back</MudButton>
+            }
+            @if (Index < 7)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Next">Next</MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Finish">Finish</MudButton>
+            }
+        </ActionContent>
+    </MudStepper>
+}
+
+@code {
+    private bool _ready;
+    private bool _signedIn;
+    private bool _hasAccount;
+    private string _email = "";
+    private MudStepper _stepper = default!;
+    private int _index;
+    private bool _appliedStep;
+    private bool _rcloneSkip;
+    private EnvironmentReport _env = SetupGuide.Inspect([]);
+    private List<LocationRow> _places = [];
+    private string _rcUrl = SetupGuide.SuggestedRcUrl;
+    private string _rcUser = SetupGuide.DefaultRcUser;
+    private string _existingPassword = "";
+    private string _generated = "";
+    private bool _hasPassword;
+    private string _testMessage = "";
+    private bool _testOk;
+    private string _exampleScript = "";
+    private string _appdata = SetupGuide.DefaultAppdata;
+    private string _statusPath = "/config/host/tailscale.json";
+    private HelperView _helper = new("red", "", "", null);
+    private bool _checking;
+    private int _waited;
+    private List<CopyDraft> _pairs = [];
+    private string _ntfyUrl = SetupGuide.DefaultNtfy;
+    private string _ntfyTopic = "";
+    private string _ntfyToken = "";
+    private bool _hasToken;
+    private bool _alertFailed = true;
+    private bool _alertDone;
+    private bool _alertStale = true;
+    private bool _alertDown = true;
+    private bool _alertRoutes = true;
+    private string _speedMode = "off";
+    private double _speedCustom = 1;
+    private double _speedSchedule = 1;
+    private int _speedStart = 7;
+    private int _speedEnd = 23;
+    private IReadOnlyList<ChecklistItem> _review = [];
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthState { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "step")]
+    private int? Step { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    private string? Error { get; set; }
+
+    private int Index
+    {
+        get => _index;
+        set
+        {
+            if (_index == value)
+                return;
+            _index = value;
+            if (_index == 7)
+                _ = RefreshReview();
+        }
+    }
+
+    private string Snippet => SetupGuide.RcloneSnippet(_rcUser, string.IsNullOrEmpty(_existingPassword) ? _generated : _existingPassword, _rcUrl);
+
+    private string HelperText => SetupGuide.HelperScript(_appdata);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState;
+        _signedIn = auth.User.Identity?.IsAuthenticated == true;
+        _email = auth.User.Identity?.Name ?? "";
+        var model = await Wizard.LoadAsync();
+        _hasAccount = model.HasAccount;
+        if (_signedIn)
+        {
+            Apply(model);
+            if (Step is int step && step is >= 1 and <= 8)
+            {
+                _index = step - 1;
+                _appliedStep = true;
+            }
+        }
+        _exampleScript = SetupGuide.ExampleCopyScript();
+        _ready = true;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (_appliedStep || !_signedIn || Step is not int step || step is < 1 or > 8)
+            return;
+        _index = step - 1;
+        _appliedStep = true;
+    }
+
+    private void Apply(WizardModel model)
+    {
+        _env = model.Environment;
+        _places = model.Environment.Choices.ToList();
+        var identity = model.HasRcPassword || !string.IsNullOrWhiteSpace(model.RcUser);
+        _rcUrl = SetupGuide.FormRcUrl(model.RcUrl, identity);
+        _rcUser = string.IsNullOrWhiteSpace(model.RcUser) ? SetupGuide.DefaultRcUser : model.RcUser;
+        _hasPassword = model.HasRcPassword;
+        _appdata = model.SuggestedAppdata;
+        _statusPath = model.TailscaleStatusPath;
+        _helper = model.Helper;
+        _pairs = model.Pairs;
+        _ntfyUrl = string.IsNullOrWhiteSpace(model.NtfyServerUrl) ? SetupGuide.DefaultNtfy : model.NtfyServerUrl;
+        _ntfyTopic = model.NtfyTopic;
+        _hasToken = model.HasNtfyToken;
+        _alertFailed = model.AlertJobFailed;
+        _alertDone = model.AlertJobCompleted;
+        _alertStale = model.AlertMountUnresponsive;
+        _alertDown = model.AlertMountUnmounted;
+        _alertRoutes = model.AlertAcceptRoutesOff;
+        _speedMode = model.BandwidthMode is "custom" or "schedule" ? model.BandwidthMode : "off";
+        _speedCustom = model.BandwidthMegabytes;
+        _speedSchedule = model.ScheduleMegabytes;
+        _speedStart = model.ScheduleStartHour;
+        _speedEnd = model.ScheduleEndHour;
+        _review = model.Checklist;
+    }
+
+    private async Task Preview(StepperInteractionEventArgs args)
+    {
+        if (args.Action != StepAction.Complete)
+            return;
+        var error = await SaveStep(_index);
+        if (error is not null)
+        {
+            args.Cancel = true;
+            Snackbar.Add(error, Severity.Warning);
+            return;
+        }
+
+        if (_index == 2)
+            _generated = "";
+        _rcloneSkip = false;
+    }
+
+    private Task Next() => _stepper.NextStepAsync();
+
+    private Task Back() => _stepper.PreviousStepAsync();
+
+    private async Task SkipRclone()
+    {
+        _rcloneSkip = true;
+        await _stepper.NextStepAsync();
+    }
+
+    private async Task<string?> SaveStep(int index)
+    {
+        switch (index)
+        {
+            case 2:
+                if (_rcloneSkip)
+                {
+                    await Wizard.SkipRcloneAsync();
+                    return null;
+                }
+
+                string? password = null;
+                if (!string.IsNullOrEmpty(_existingPassword))
+                    password = _existingPassword;
+                else if (!string.IsNullOrEmpty(_generated))
+                    password = _generated;
+                else if (!_hasPassword)
+                    return "Generate a password or type the one rclone already uses. Or choose log only.";
+                var saved = await Wizard.SaveRcloneAsync(_rcUrl, _rcUser, password);
+                if (saved is null && !string.IsNullOrEmpty(password))
+                    _hasPassword = true;
+                return saved;
+            case 3:
+                return await Wizard.SaveAppdataAsync(_appdata);
+            case 4:
+                return await Wizard.SavePairsAsync(_pairs);
+            case 5:
+                var alerts = await Wizard.SaveAlertsAsync(_ntfyUrl, _ntfyTopic, _ntfyToken, _alertFailed, _alertDone, _alertStale, _alertDown, _alertRoutes);
+                if (alerts is null && !string.IsNullOrEmpty(_ntfyToken))
+                {
+                    _hasToken = true;
+                    _ntfyToken = "";
+                }
+
+                return alerts;
+            case 6:
+                await Wizard.SaveSpeedAsync(_speedMode, _speedCustom, _speedSchedule, _speedStart, _speedEnd);
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    private void Generate() => _generated = SetupGuide.GeneratePassword();
+
+    private async Task TestRclone()
+    {
+        var typed = !string.IsNullOrEmpty(_existingPassword) ? _existingPassword : _generated;
+        var probe = await Wizard.TestRcloneAsync(_rcUrl, _rcUser, string.IsNullOrEmpty(typed) ? null : typed);
+        _testOk = probe.Access == RcAccess.Ok;
+        _testMessage = SetupGuide.VersionGuidance(probe.Access, probe.Version);
+    }
+
+    private async Task CheckHelper()
+    {
+        _checking = true;
+        var first = Wizard.ReadHelper(_statusPath);
+        _helper = first;
+        if (first.Level != "green")
+        {
+            var started = DateTime.UtcNow;
+            while ((DateTime.UtcNow - started).TotalSeconds < 70)
+            {
+                await Task.Delay(2000);
+                _waited = (int)(DateTime.UtcNow - started).TotalSeconds;
+                _helper = Wizard.ReadHelper(_statusPath);
+                await InvokeAsync(StateHasChanged);
+                var appeared = first.WrittenUtc is null && _helper.WrittenUtc is not null;
+                var refreshed = first.WrittenUtc is not null && _helper.WrittenUtc is not null && _helper.WrittenUtc > first.WrittenUtc;
+                if (_helper.Level == "green" || appeared || refreshed)
+                    break;
+            }
+        }
+
+        _checking = false;
+    }
+
+    private void AddPair() => _pairs.Add(new CopyDraft { Id = Guid.NewGuid(), Fresh = true });
+
+    private async Task SendTest()
+    {
+        var error = await Wizard.SaveAlertsAsync(_ntfyUrl, _ntfyTopic, _ntfyToken, _alertFailed, _alertDone, _alertStale, _alertDown, _alertRoutes);
+        if (error is not null)
+        {
+            Snackbar.Add(error, Severity.Warning);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(_ntfyToken))
+        {
+            _hasToken = true;
+            _ntfyToken = "";
+        }
+
+        var result = await Wizard.SendTestAsync();
+        Snackbar.Add(result, result.Contains("sent", StringComparison.OrdinalIgnoreCase) ? Severity.Success : Severity.Warning);
+    }
+
+    private async Task RefreshReview()
+    {
+        var model = await Wizard.LoadAsync();
+        _review = model.Checklist;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Finish()
+    {
+        await Wizard.MarkFinishedAsync();
+        Nav.NavigateTo("/");
+    }
+
+    private async Task Copy(string text)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("syncsentryCopy", text);
+            Snackbar.Add("Copied.", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Select the text and copy it.", Severity.Info);
+        }
+    }
+
+    private static string LevelClass(string level) => level switch
+    {
+        "green" => "badge-ok",
+        "red" => "badge-error",
+        _ => "badge-wait"
+    };
+
+    private static string LevelWord(string level) => level switch
+    {
+        "green" => "Ready",
+        "red" => "Needs attention",
+        _ => "Optional"
+    };
+
+    private static Severity LevelSeverity(string level) => level switch
+    {
+        "green" => Severity.Success,
+        "red" => Severity.Error,
+        _ => Severity.Warning
+    };
+}

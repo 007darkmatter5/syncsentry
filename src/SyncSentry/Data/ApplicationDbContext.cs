@@ -17,6 +17,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<RouteStateRow> RouteStates => Set<RouteStateRow>();
     public DbSet<TransferEvent> TransferEvents => Set<TransferEvent>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
+    public DbSet<SetupState> SetupStates => Set<SetupState>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -125,6 +126,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.ToTable("UserPreferences");
             entity.Property(item => item.UserId).HasMaxLength(450).IsRequired();
             entity.HasIndex(item => item.UserId).IsUnique();
+        });
+
+        builder.Entity<SetupState>(entity =>
+        {
+            entity.ToTable("SetupState");
+            entity.Property(item => item.AppdataHostPath).HasMaxLength(500);
         });
     }
 }

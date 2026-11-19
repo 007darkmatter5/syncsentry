@@ -19,6 +19,9 @@
     <Routes @rendermode="PageRenderMode" />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
+    <script>
+        window.syncsentryCopy = (text) => navigator.clipboard.writeText(text);
+    </script>
 </body>
 
 </html>

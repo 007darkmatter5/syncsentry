@@ -571,6 +571,37 @@ namespace SyncSentry.Data.Migrations
                     b.ToTable("RouteState", (string)null);
                 });
 
+            modelBuilder.Entity("SyncSentry.Data.SetupState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AppdataHostPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Finished")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("HelperSkipped")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("LegacyUpgrade")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RcloneSkipped")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SetupState", (string)null);
+                });
+
             modelBuilder.Entity("SyncSentry.Data.SyncJobDefinition", b =>
                 {
                     b.Property<Guid>("Id")

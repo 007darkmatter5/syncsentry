@@ -1,0 +1,45 @@
+@page "/settings/setup"
+@inject SetupService Setup
+
+<PageTitle>Setup checklist · SyncSentry</PageTitle>
+
+<div class="kicker">Config</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Setup checklist</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Each line is checked from what is saved and what the container can see right now. Re-run opens that step. Existing settings are not cleared.</MudText>
+
+@if (_items.Count == 0)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    @if (_legacy)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-3" Variant="Variant.Outlined">This install was already in use. The wizard did not change those settings. The dashboard only speaks up when a check is actually failing.</MudAlert>
+    }
+    <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+        @foreach (var item in _items)
+        {
+            <div class="kv" @key="item.Step">
+                <span class="status-badge @(item.Level == "green" ? "badge-ok" : item.Level == "red" ? "badge-error" : "badge-wait")">@(item.Level == "green" ? "Ready" : item.Level == "red" ? "Needs attention" : "Optional")</span>
+                <span class="kv-key">@item.Name</span>
+                <span class="kv-val">
+                    @item.Detail
+                    <MudLink Href="@($"/setup?step={item.Step}")" Class="ml-2">Re-run</MudLink>
+                </span>
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    private IReadOnlyList<ChecklistItem> _items = [];
+    private bool _legacy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var model = await Setup.LoadAsync();
+        _items = model.Checklist;
+        _legacy = model.State.LegacyUpgrade;
+    }
+}

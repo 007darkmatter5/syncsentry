@@ -120,6 +120,9 @@ public class MonitorTests
 
         public Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
             => Task.FromResult<string?>("v1.76.0");
+
+        public Task<RcVersionProbe> ProbeVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+            => Task.FromResult(new RcVersionProbe(RcAccess.Ok, "v1.76.0"));
     }
 
     private sealed class DirectLogs : ILogReader

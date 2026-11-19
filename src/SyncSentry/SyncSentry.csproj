@@ -25,4 +25,11 @@
     <InternalsVisibleTo Include="SyncSentry.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\deploy\unraid\syncsentry-host.sh">
+      <LogicalName>SyncSentry.Setup.syncsentry-host.sh</LogicalName>
+    </EmbeddedResource>
+    <Content Include="..\..\deploy\unraid\jobs\media-copy.sh.example" Link="setup/media-copy.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

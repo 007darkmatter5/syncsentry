@@ -52,6 +52,17 @@ public sealed class UserPreference
     public bool DarkMode { get; set; }
 }
 
+public sealed class SetupState
+{
+    public int Id { get; set; }
+    public bool Finished { get; set; }
+    public bool LegacyUpgrade { get; set; }
+    public bool RcloneSkipped { get; set; }
+    public bool HelperSkipped { get; set; }
+    public string AppdataHostPath { get; set; } = "";
+    public DateTimeOffset UpdatedUtc { get; set; }
+}
+
 public sealed class WatchedMount
 {
     public int Id { get; set; }

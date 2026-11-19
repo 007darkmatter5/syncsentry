@@ -102,6 +102,18 @@ html, body {
     margin: .5rem 0;
 }
 
+.copy-block {
+    background: var(--mud-palette-background-gray);
+    border-radius: 8px;
+    padding: .75rem 1rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .8rem;
+    line-height: 1.45;
+}
+
 .copy-route {
     display: flex;
     flex-wrap: wrap;

@@ -5,6 +5,8 @@
 @inject RunNowService RunNow
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject SetupService Setup
+@inject NavigationManager Nav
 @implements IDisposable
 
 <PageTitle>Dashboard · SyncSentry</PageTitle>
@@ -13,6 +15,14 @@
     var live = Copies.Current;
     var server = live.Server;
     var panels = live.Panels ?? [];
+}
+
+@foreach (var gap in _gaps)
+{
+    <MudAlert Severity="@(gap.Level == "red" ? Severity.Error : Severity.Warning)" Class="mb-3" Variant="Variant.Outlined" Dense="true">
+        @gap.Text
+        <MudLink Href="@gap.Href" Class="ml-2">Open this step</MudLink>
+    </MudAlert>
 }
 
 @if (live.Access != RcAccess.Ok)
@@ -128,9 +138,18 @@
     private string _mode = "off";
     private double _megabytes = 1;
     private bool _busy;
+    private IReadOnlyList<SetupGap> _gaps = [];
 
     protected override async Task OnInitializedAsync()
     {
+        var setup = await Setup.LoadAsync();
+        if (!setup.State.Finished && !setup.State.LegacyUpgrade)
+        {
+            Nav.NavigateTo("/setup");
+            return;
+        }
+
+        _gaps = setup.Gaps;
         var general = await Store.LoadGeneralAsync();
         _mode = general.BandwidthMode == "custom" ? "custom" : "off";
         _megabytes = general.BandwidthMegabytes <= 0 ? 1 : general.BandwidthMegabytes;

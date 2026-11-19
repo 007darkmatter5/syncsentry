@@ -12,7 +12,9 @@
   <TemplateURL>https://raw.githubusercontent.com/007darkmatter5/syncsentry/main/unraid/syncsentry-beta.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/007darkmatter5/syncsentry/main/docs/images/icon.png</Icon>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
-  <Overview>SyncSentry-Beta is the beta channel of SyncSentry. It watches rclone copy and sync jobs, mergerfs pools, and SMB/CIFS mounts on an Unraid server. Use this beside the stable container: it has its own appdata folder and it listens on host port 8081 so the two do not collide.
+  <Overview>SyncSentry-Beta is the beta channel of SyncSentry. It watches rclone copy and sync jobs, mergerfs pools, and SMB/CIFS mounts on an Unraid server. The first time you open the web page, a setup wizard walks you through the admin account, the read-only folders, rclone, a host helper script, the copies to follow, and alerts. It shows commands to copy and then checks the result. It does not edit files on the host. An install that is already configured is not sent through the wizard again.
+
+Use this beside the stable container: it has its own appdata folder and it listens on host port 8081 so the two do not collide.
 
 It does not mount or unmount disks, and it does not write to your media. Mount the shares below read-only with rslave propagation. A hard CIFS mount can freeze the process that asks it for free space when the network path drops; SyncSentry checks those paths in a short-lived helper and reports the mount unresponsive instead of getting stuck.
 

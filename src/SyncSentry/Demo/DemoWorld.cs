@@ -10,9 +10,11 @@ public sealed class DemoMountTable : IMountTable
 {
     public IReadOnlyList<MountEntry> Read() =>
     [
-        new("/mnt/user", "fuse.mergerfs", "/mnt/disk1:/mnt/disk2"),
-        new("/mnt/remotes/UNASPRO_Media", "cifs", "//192.168.1.20/Media"),
-        new("/mnt/remotes/backup", "cifs", "//192.168.1.20/backup")
+        new("/mnt/user", "shfs", "shfs", "ro,relatime", "/", true),
+        new("/mnt/remotes", "xfs", "/mnt/cache/remotes", "ro,relatime", "/", true),
+        new("/mnt/remotes/UNASPRO_Media", "cifs", "//192.168.1.20/Media", "ro,relatime", "/", true),
+        new("/mnt/remotes/backup", "cifs", "//192.168.1.20/backup", "ro,relatime", "/", true),
+        new("/mnt/pool/media", "fuse.mergerfs", "/mnt/disk1:/mnt/disk2", "ro,relatime", "/", true)
     ];
 }
 
@@ -97,6 +99,9 @@ public sealed class DemoRclone : IRcloneRc
 
     public Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
         => Task.FromResult<string?>("v1.76.0");
+
+    public Task<RcVersionProbe> ProbeVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+        => Task.FromResult(new RcVersionProbe(RcAccess.Ok, "v1.76.0"));
 
     private static BandwidthReading Reading(string rate)
         => rate.Equals("off", StringComparison.OrdinalIgnoreCase)

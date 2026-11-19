@@ -14,6 +14,7 @@ using SyncSentry.Outbox;
 using SyncSentry.Rclone;
 using SyncSentry.Security;
 using SyncSentry.Services;
+using SyncSentry.Setup;
 
 if (IoCommands.TryHandle(args, out var exitCode))
     return exitCode;
@@ -99,6 +100,7 @@ builder.Services.AddSingleton<LiveBoard>();
 builder.Services.AddSingleton<LiveCopyBoard>();
 builder.Services.AddSingleton<TransferLog>();
 builder.Services.AddSingleton<SettingsStore>();
+builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<RunNowService>();
 builder.Services.AddSingleton<OutboxService>();
 

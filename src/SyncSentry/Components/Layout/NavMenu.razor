@@ -23,7 +23,7 @@
             <MudNavLink Href="Account/Login" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">Log in</MudNavLink>
             @if (!_hasAccount)
             {
-                <MudNavLink Href="Account/Register" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.PersonAdd">Create admin account</MudNavLink>
+                <MudNavLink Href="setup" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.PersonAdd">Create admin account</MudNavLink>
             }
         </NotAuthorized>
     </AuthorizeView>

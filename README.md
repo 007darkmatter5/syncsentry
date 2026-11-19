@@ -41,7 +41,9 @@ Until then you can add the container from the Docker page:
 
 If the template's propagation attribute is ignored by your Unraid build, open the path in the Docker UI and set **Read only** and **rslave** there. Do not add extra capabilities. Do not mount the Docker socket.
 
-Open `http://<unraid>:8080/`, create the admin account, and sign in.
+Open `http://<unraid>:8080/`. The first visit opens a setup wizard. It asks for the admin account, checks that `/mnt/user` and `/mnt/remotes` are mounted read-only, and then shows the rclone flags and the host helper script for you to paste. You pick the copy pairs the dashboard should follow, and you can turn on ntfy and a speed limit. Nothing in the wizard edits the Unraid host. It saves settings in appdata and then checks that the helper file showed up.
+
+An install that already has an admin account is not sent through the wizard. On upgrade, SyncSentry marks the steps it can already see (rclone login, helper status file, saved copies) and leaves every saved setting as it was. The dashboard shows a banner only when a required folder is missing or not read-only, or when a check you still need is failing. Settings has a setup checklist with a Re-run link for each step.
 
 ### 2. Mount checks
 
@@ -87,7 +89,7 @@ chmod +x /boot/config/plugins/user.scripts/scripts/syncsentry-jobs/media-copy.sh
 
 The example is the existing copy: `/usr/sbin/rclone copy` from `/mnt/user/data/media` to `/mnt/remotes/UNASPRO_Media/media`, logging INFO and a 60-second one-line stat to `/mnt/cache/appdata/mediamanny/logs/initial-copy.log`.
 
-In SyncSentry, the seeded job **Media initial copy** uses start mode **Host trigger** and script key `media-copy`. **Run now** writes a trigger file. It does not run a shell in the container. If a trigger is already waiting, or the log still looks active, Run now refuses.
+The setup wizard can attach a script name to a copy. **Run now** then writes a trigger file whose first line is `scriptKey=<name>`. The helper runs only `/boot/config/plugins/user.scripts/scripts/syncsentry-jobs/<name>.sh`. It does not run a shell in the container. If a trigger is already waiting, or the log still looks active, Run now refuses. The example script key is `media-copy`.
 
 ### 5. rclone remote control
 

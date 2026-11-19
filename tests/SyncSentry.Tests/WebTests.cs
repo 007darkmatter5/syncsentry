@@ -23,6 +23,12 @@ public class WebTests : IClassFixture<SyncSentryApp>
         Assert.Contains("Log in", html);
         Assert.Contains("blazor.web.js", html);
         Assert.Contains("Create the admin account", html);
+
+        var setup = await client.GetAsync("/setup");
+        Assert.Equal(HttpStatusCode.OK, setup.StatusCode);
+        var setupHtml = await setup.Content.ReadAsStringAsync();
+        Assert.Contains("Admin account", setupHtml);
+        Assert.DoesNotContain("Account/Login?returnUrl", setupHtml);
     }
 }
 

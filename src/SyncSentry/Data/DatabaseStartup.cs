@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using SyncSentry.Demo;
 using SyncSentry.Security;
 using SyncSentry.Services;
+using SyncSentry.Setup;
 
 namespace SyncSentry.Data;
 
@@ -46,23 +47,6 @@ public static class DatabaseStartup
 
         await db.SaveChangesAsync();
 
-        if (!await db.Jobs.AnyAsync())
-        {
-            var log = await db.LogSources.OrderBy(item => item.Id).FirstAsync();
-            db.Jobs.Add(new SyncJobDefinition
-            {
-                Id = Guid.NewGuid(),
-                Name = "Media initial copy",
-                Enabled = true,
-                StartMode = "trigger",
-                Operation = "copy",
-                Source = "/mnt/user/data/media",
-                Destination = "/mnt/remotes/UNASPRO_Media/media",
-                ScriptKey = "media-copy",
-                LogSourceId = log.Id
-            });
-        }
-
         if (!await db.OutboxPairs.AnyAsync())
         {
             db.OutboxPairs.Add(new OutboxPair
@@ -87,6 +71,18 @@ public static class DatabaseStartup
 
         if (AppFlags.Demo(configuration))
             await ApplyDemoAsync(db, setting, now);
+
+        if (!await db.SetupStates.AnyAsync())
+        {
+            var hasUser = await db.Users.AnyAsync();
+            var hasRc = SetupGuide.HasRcIdentity(setting.RcUser, setting.RcPasswordProtected);
+            var helperPath = setting.TailscaleStatusPath;
+            var helperThere = Rules.AbsolutePath(helperPath)
+                && !helperPath.StartsWith("/mnt", StringComparison.Ordinal)
+                && File.Exists(helperPath);
+            db.SetupStates.Add(SetupGuide.InitialState(hasUser, hasRc, helperThere, now));
+            await db.SaveChangesAsync();
+        }
     }
 
     public static void ApplyEnvironment(InstanceSetting setting, IConfiguration configuration, ISecretProtector protector, DateTimeOffset now)

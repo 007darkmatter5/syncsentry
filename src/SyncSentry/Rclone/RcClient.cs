@@ -86,9 +86,13 @@ public interface IRcloneRc
     Task<BandwidthReading> SetBandwidthAsync(string? url, string? user, string? password, string rate, CancellationToken cancellationToken);
 
     Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken);
+
+    Task<RcVersionProbe> ProbeVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken);
 }
 
 public sealed record BandwidthReading(string Rate, long BytesPerSecond, bool Ok);
+
+public sealed record RcVersionProbe(RcAccess Access, string? Version);
 
 public sealed record RemoteListResult(bool Ok, bool Truncated, string? Error, IReadOnlyList<FileFingerprint> Files);
 
@@ -362,13 +366,31 @@ public sealed class RcloneRcClient(IHttpClientFactory factory) : IRcloneRc
 
     public async Task<string?> GetVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
     {
+        var probe = await ProbeVersionAsync(url, user, password, cancellationToken).ConfigureAwait(false);
+        return probe.Access == RcAccess.Ok ? probe.Version : null;
+    }
+
+    public async Task<RcVersionProbe> ProbeVersionAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
+    {
         if (!Rules.RcUrl(url))
-            return null;
-        var result = await PostAsync(url!, user, password, "core/version", new { }, cancellationToken).ConfigureAwait(false);
-        if (result.Document is null)
-            return null;
-        using var doc = result.Document;
-        return doc.RootElement.TryGetProperty("version", out var version) ? version.GetString() : null;
+            return new RcVersionProbe(RcAccess.NotConfigured, null);
+        try
+        {
+            var result = await PostAsync(url!, user, password, "core/version", new { }, cancellationToken).ConfigureAwait(false);
+            if (result.Status == 401)
+                return new RcVersionProbe(RcAccess.Unauthorized, null);
+            if (result.Document is null)
+                return new RcVersionProbe(result.Status == 0 ? RcAccess.Unreachable : RcAccess.Failed, null);
+            using var doc = result.Document;
+            var version = doc.RootElement.TryGetProperty("version", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+            return new RcVersionProbe(RcAccess.Ok, version);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return new RcVersionProbe(RcAccess.Unreachable, null);
+        }
     }
 
     private async Task<BandwidthReading> BandwidthAsync(string? url, string? user, string? password, string? rate, CancellationToken cancellationToken)
