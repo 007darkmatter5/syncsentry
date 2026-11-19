@@ -13,6 +13,9 @@ WORKDIR /src
 # trick) makes the SDK leave out Blazor's framework scripts (_framework/blazor.web.js), and the app then
 # renders but never becomes interactive.
 COPY src/ src/
+# The setup wizard pastes these scripts. They live outside src/, so the image build has to bring them in.
+COPY deploy/unraid/syncsentry-host.sh deploy/unraid/syncsentry-host.sh
+COPY deploy/unraid/jobs/media-copy.sh.example deploy/unraid/jobs/media-copy.sh.example
 RUN dotnet restore src/SyncSentry/SyncSentry.csproj -a $TARGETARCH \
     && dotnet publish src/SyncSentry/SyncSentry.csproj -c Release -a $TARGETARCH --no-restore -o /out/app -p:Version=$VERSION \
     && test -f /out/app/wwwroot/_framework/blazor.web.js
