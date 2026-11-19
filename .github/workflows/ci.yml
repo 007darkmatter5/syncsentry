@@ -1,10 +1,10 @@
 name: CI
 
-# Build and test pull requests. Pushes to main are tested by the release workflow,
+# Build and test pull requests. Pushes to main and beta are tested by the release workflow,
 # and that workflow publishes only from github.com/007darkmatter5/syncsentry.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, beta]
   workflow_dispatch:
 
 permissions:
