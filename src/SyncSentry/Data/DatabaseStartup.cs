@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SyncSentry.Demo;
+using SyncSentry.Jobs;
 using SyncSentry.Security;
 using SyncSentry.Services;
 using SyncSentry.Setup;
@@ -83,6 +84,8 @@ public static class DatabaseStartup
             db.SetupStates.Add(SetupGuide.InitialState(hasUser, hasRc, helperThere, now));
             await db.SaveChangesAsync();
         }
+
+        await scope.ServiceProvider.GetRequiredService<TransferLog>().CleanupDuplicatesAsync();
     }
 
     public static void ApplyEnvironment(InstanceSetting setting, IConfiguration configuration, ISecretProtector protector, DateTimeOffset now)

@@ -217,6 +217,29 @@ public class LiveCopyTests
     }
 
     [Fact]
+    public void Finished_checks_are_marked_so_they_can_be_ignored()
+    {
+        using var doc = JsonDocument.Parse("""
+            {"transferred":[
+              {"name":"Movies/Seen.mkv","size":100,"bytes":0,"checked":true,"completedAt":"2026-11-20T15:02:00Z"},
+              {"name":"Movies/New.mkv","size":100,"bytes":100,"checked":false,"completedAt":"2026-11-20T15:02:30Z"}
+            ]}
+            """);
+        var finished = RcJson.ParseFinished(doc.RootElement);
+        var seen = Assert.Single(finished, item => item.Name == "Movies/Seen.mkv");
+        Assert.True(seen.Checked);
+        Assert.Equal(0, seen.Bytes);
+        Assert.True(TransferRules.IsRecheck(seen));
+        var created = Assert.Single(finished, item => item.Name == "Movies/New.mkv");
+        Assert.False(TransferRules.IsRecheck(created));
+        var started = DateTimeOffset.Parse("2026-11-20T15:02:00Z");
+        Assert.True(TransferRules.IsBeforeProcess(
+            new RcFinished("Movies/Old.mkv", 10, started.AddHours(-3), true, null),
+            started));
+        Assert.Equal("Movies/Seen.mkv|100|1", TransferRules.DedupeKey("Movies/Seen.mkv", 100, true));
+    }
+
+    [Fact]
     public void Mount_labels_use_plain_names()
     {
         var mounts = new MountView[]

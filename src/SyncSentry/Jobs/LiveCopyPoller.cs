@@ -216,7 +216,9 @@ public sealed class LiveCopyPoller(
             .ToArray();
 
         var historyDays = settings.HistoryDays <= 0 ? 30 : settings.HistoryDays;
-        await transfers.RememberAsync(finishedSource, historyDays, now, cancellationToken);
+        var elapsed = snapshot.Global?.ElapsedSeconds ?? copies.Select(item => item.ElapsedSeconds).FirstOrDefault(item => item is > 0);
+        DateTimeOffset? processStart = elapsed is > 0 ? now.AddSeconds(-elapsed.Value) : null;
+        await transfers.RememberAsync(finishedSource, historyDays, now, processStart, cancellationToken);
         var history = await transfers.RecentAsync(false, 400, cancellationToken);
         var saved = await context.Jobs.AsNoTracking().Where(item => item.Enabled).ToListAsync(cancellationToken);
         var panels = FolderBoards.Build(copies, files, history, saved, mountViews);

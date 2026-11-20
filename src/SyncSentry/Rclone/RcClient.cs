@@ -23,7 +23,9 @@ public sealed record RcFinished(
     bool Ok,
     string? Error,
     string Source = "",
-    string Destination = "");
+    string Destination = "",
+    bool Checked = false,
+    long Bytes = -1);
 
 public enum RcAccess
 {
@@ -171,7 +173,9 @@ public static class RcJson
                 error.Length == 0,
                 error.Length == 0 ? null : SecretRedactor.ForDisplay(error, 200),
                 Text(item, "srcFs"),
-                Text(item, "dstFs")));
+                Text(item, "dstFs"),
+                Flag(item, "checked"),
+                item.TryGetProperty("bytes", out _) ? Long(item, "bytes") : -1));
         }
 
         return items
@@ -212,6 +216,21 @@ public static class RcJson
 
     public static long? ParseStartedJob(JsonElement root)
         => root.TryGetProperty("jobid", out var id) && id.TryGetInt64(out var value) ? value : null;
+
+    private static bool Flag(JsonElement root, string name)
+    {
+        foreach (var key in new[] { name, char.ToUpperInvariant(name[0]) + name[1..] })
+        {
+            if (!root.TryGetProperty(key, out var value))
+                continue;
+            if (value.ValueKind == JsonValueKind.True)
+                return true;
+            if (value.ValueKind == JsonValueKind.False)
+                return false;
+        }
+
+        return false;
+    }
 
     private static long Long(JsonElement root, string name)
         => root.TryGetProperty(name, out var value) && value.TryGetInt64(out var number) ? number : 0;
