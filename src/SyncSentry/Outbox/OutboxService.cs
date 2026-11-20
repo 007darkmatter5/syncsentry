@@ -34,7 +34,7 @@ public sealed class OutboxService(
     public async Task<int?> NextStaleIdAsync(CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var settings = await db.Settings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.Settings.AsNoTracking().OrderBy(item => item.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is null)
             return null;
         var cache = TimeSpan.FromMinutes(Rules.Clamp(settings.OutboxCacheMinutes, 1, 24 * 60));
@@ -51,8 +51,8 @@ public sealed class OutboxService(
     private async Task ScanCoreAsync(int pairId, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var pair = await db.OutboxPairs.FirstOrDefaultAsync(item => item.Id == pairId, cancellationToken);
-        var settings = await db.Settings.FirstOrDefaultAsync(cancellationToken);
+        var pair = await db.OutboxPairs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == pairId, cancellationToken);
+        var settings = await db.Settings.OrderBy(item => item.Id).FirstOrDefaultAsync(cancellationToken);
         if (pair is null || settings is null)
             return;
 

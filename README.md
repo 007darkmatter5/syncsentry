@@ -10,7 +10,7 @@ It does not mount or unmount anything, and it does not write to media. mergerfs 
 
 - **Dashboard.** The home page, laid out like the Syncthing web UI. The left column is one card per copy (source folder to destination folder), with a colored status (Up to date, Copying, Waiting, Error, Unknown) and a thin progress bar. Open a card for the paths, what is left, speed, ETA, the last file, and the files moving right now. Finished copies stay on the page with the last time they ran. The right column is this server (download and upload rate, the speed limit, Tailscale accept-routes, uptime, versions) and one card per location (connected, stale, or disconnected, with free space).
 - **Mounts.** The same locations in more detail: mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
-- **Outbox.** For a source and a destination you configure, files that are missing, a different size, or newer on the source. Results are cached. A scan stops at a file cap and a time cap.
+- **History.** Completed copies for the last 30 days: the folder, the file, where it went, the size, and whether it copied or failed. Syncthing markers, `.partial` files, and rclone temp files are hidden. **Waiting to copy** is the separate list of files still only on the source.
 - **Logs.** Tail, search, and level filter for the log files you configure.
 - **Run now.** Starts one saved job. It will not start a second copy of a job that is already running.
 - **Alerts.** Job failed, job completed, mount unresponsive, mount unmounted, Tailscale accept-routes off. Each one can be turned off. A test button sends one notification.
@@ -177,6 +177,8 @@ These are the demo fixtures, including a CIFS mount that is pretending to be fro
 ![Mounts](docs/images/screenshots/mounts.png)
 
 ![History](docs/images/screenshots/history.png)
+
+![Recent changes](docs/images/screenshots/recent.png)
 
 ![Settings](docs/images/screenshots/settings.png)
 

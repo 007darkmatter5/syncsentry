@@ -112,7 +112,11 @@ public class OutboxTests
         {
             new("movies/Ready.mkv", 100, 1_000),
             new("movies/New.mkv", 200, 2_000),
-            new("shows/Pilot.mkv", 50, 2_000)
+            new("shows/Pilot.mkv", 50, 2_000),
+            new("Movies/.stfolder/syncthing-folder-abc.txt", 80, 1_000),
+            new("Movies/Clip.mkv.partial", 10, 1_000),
+            new(".rclone-upload.tmp", 4, 1_000),
+            new("~syncthing~Clip.tmp", 4, 1_000)
         };
         var dest = new List<FileFingerprint>
         {
@@ -125,6 +129,7 @@ public class OutboxTests
         Assert.Equal(250, diff.Bytes);
         Assert.Contains(diff.Sample, item => item.Path == "movies/New.mkv" && item.Reason == "size");
         Assert.Contains(diff.Sample, item => item.Path == "shows/Pilot.mkv" && item.Reason == "missing");
+        Assert.DoesNotContain(diff.Sample, item => item.Path.Contains("stfolder", StringComparison.Ordinal) || item.Path.Contains("partial", StringComparison.Ordinal) || item.Path.Contains("rclone", StringComparison.Ordinal) || item.Path.Contains("syncthing", StringComparison.Ordinal));
         Assert.DoesNotContain(diff.Sample, item => item.Path.Contains("Ready", StringComparison.Ordinal));
 
         var incomplete = OutboxComparer.Compare(source, dest, true, false);
@@ -221,6 +226,31 @@ public class LiveCopyTests
         };
         Assert.Equal("UNASPRO_Media (remote SMB)", MountLabels.Label("/mnt/remotes/UNASPRO_Media/Movies/Example.mkv", mounts));
         Assert.Equal("Unraid array (user share)", MountLabels.Label("/mnt/user/data/media/Movies/Example.mkv", mounts));
+    }
+
+    [Fact]
+    public void Change_rows_use_the_folder_and_a_short_place()
+    {
+        var (title, file) = ChangeText.Split("A Few Good Men (1992)/A Few Good Men (1992).mkv");
+        Assert.Equal("A Few Good Men (1992)", title);
+        Assert.Equal("A Few Good Men (1992).mkv", file);
+        Assert.Equal("UNASPRO_Media/Movies", ChangeText.Place("/mnt/remotes/UNASPRO_Media/Movies"));
+        Assert.Equal("Unraid array/Movies", ChangeText.Place("/mnt/user/data/media/Movies"));
+        Assert.True(NoiseFiles.IsJunk("Movies/.stfolder/syncthing-folder-1.txt"));
+        Assert.True(NoiseFiles.IsJunk("Clip.mkv.partial"));
+        Assert.True(NoiseFiles.IsJunk(".rclone-upload.tmp"));
+        Assert.True(NoiseFiles.IsJunk("~syncthing~Clip.tmp"));
+        Assert.False(NoiseFiles.IsJunk("A Few Good Men (1992)/English.srt"));
+        var line = ChangeText.Line(
+            new HistoryRow("A Few Good Men (1992)/English.srt", 42_000, DateTimeOffset.Parse("2026-11-20T12:00:00Z"), true, null, "/mnt/remotes/UNASPRO_Media/Movies", "/mnt/user/data/media/Movies"),
+            null,
+            null,
+            DateTimeOffset.Parse("2026-11-20T12:30:00Z"));
+        Assert.Equal("English.srt", line.File);
+        Assert.Equal("UNASPRO_Media/Movies", line.From);
+        Assert.Equal("Unraid array/Movies", line.To);
+        Assert.Equal("copied", line.Result);
+        Assert.Equal("30 min ago", line.Ago);
     }
 }
 

@@ -1,0 +1,48 @@
+<div class="change-row">
+    <div class="change-main">
+        <MudTooltip Text="@FullPath">
+            <div>
+                <div class="change-title">@Title</div>
+                @if (!string.IsNullOrEmpty(File))
+                {
+                    <div class="change-file">@File</div>
+                }
+            </div>
+        </MudTooltip>
+        <MudTooltip Text="@RouteTip">
+            <div class="change-route">@From <span aria-hidden="true">→</span> @To</div>
+        </MudTooltip>
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="change-file">@Error</div>
+        }
+    </div>
+    <div class="change-meta">
+        <span>@TextFormat.Bytes(Size)</span>
+        <MudTooltip Text="@WhenText"><span>@Ago</span></MudTooltip>
+        <span class="status-badge @BadgeClass">@Label</span>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string File { get; set; } = "";
+    [Parameter] public string FullPath { get; set; } = "";
+    [Parameter] public string From { get; set; } = "";
+    [Parameter] public string To { get; set; } = "";
+    [Parameter] public string RouteTip { get; set; } = "";
+    [Parameter] public long Size { get; set; }
+    [Parameter] public string Ago { get; set; } = "";
+    [Parameter] public string WhenText { get; set; } = "";
+    [Parameter] public string Result { get; set; } = "copied";
+    [Parameter] public string? Error { get; set; }
+
+    private string Label => ChangeText.ResultLabel(Result);
+
+    private string BadgeClass => Result switch
+    {
+        "copied" => "badge-ok",
+        "deleted" => "badge-unknown",
+        _ => "badge-error"
+    };
+}

@@ -3,65 +3,133 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject SettingsStore Store
 @inject OutboxService Outbox
+@inject TransferLog Log
+@inject TimeProvider Clock
 @inject ISnackbar Snackbar
 @implements IDisposable
 
 <PageTitle>History · SyncSentry</PageTitle>
 
-<div class="kicker">Waiting and finished</div>
+<div class="kicker">Finished copies</div>
 <MudText Typo="Typo.h4" GutterBottom="true">History</MudText>
-<MudText Typo="Typo.body2" Class="mb-4 muted">Files still waiting to be copied, and copies that already finished. A scan that hits a frozen mount is abandoned instead of hanging this page.</MudText>
+<MudText Typo="Typo.body2" Class="mb-4 muted">Files that already finished copying. Waiting to copy is a separate list of files that are still only on the source.</MudText>
 
-@foreach (var pair in _pairs)
-{
-    var sample = Sample(pair.SampleJson);
-    <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true">
-        <div class="d-flex justify-space-between align-center flex-wrap gap-2">
-            <div>
-                <MudText Typo="Typo.h6">@pair.Name</MudText>
-                <div class="path">@pair.SourcePath → @pair.Destination</div>
-            </div>
-            <div>
-                <MudChip T="string" Size="Size.Small">@pair.Status</MudChip>
-                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy" OnClick="() => Refresh(pair.Id)">Refresh</MudButton>
-            </div>
+<MudTabs Rounded="true" ApplyEffectsToContainer="true">
+    <MudTabPanel Text="Completed">
+        <MudText Typo="Typo.body2" Class="mb-3">@Summary()</MudText>
+        <div class="limit-row">
+            <MudTextField @bind-Value="_search" Immediate="true" Label="Search" Variant="Variant.Outlined" Margin="Margin.Dense" />
+            <MudSelect T="string" @bind-Value="_result" Label="Result" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("all")">All</MudSelectItem>
+                <MudSelectItem T="string" Value="@("copied")">Copied</MudSelectItem>
+                <MudSelectItem T="string" Value="@("failed")">Failed</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_pair" Label="Copy" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("")">All copies</MudSelectItem>
+                @foreach (var pair in _pairs)
+                {
+                    <MudSelectItem T="string" Value="@pair.Key">@pair.Label</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_range" Label="When" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("today")">Today</MudSelectItem>
+                <MudSelectItem T="string" Value="@("7")">7 days</MudSelectItem>
+                <MudSelectItem T="string" Value="@("30")">30 days</MudSelectItem>
+            </MudSelect>
         </div>
-        <MudText Typo="Typo.body2" Class="mt-2">
-            @pair.PendingCount files · @TextFormat.Bytes(pair.PendingBytes)
-            @if (pair.LastScanUtc is not null)
+        @{
+            var filtered = Filtered();
+            var page = filtered.Skip(_page * PageSize).Take(PageSize).ToList();
+            DateTime? day = null;
+        }
+        @if (page.Count == 0)
+        {
+            <MudText Class="mt-3">No finished copies in this range.</MudText>
+        }
+        else
+        {
+            @foreach (var line in page)
             {
-                <span class="muted"> · scanned @pair.LastScanUtc.Value.ToLocalTime().ToString("g")</span>
+                var localDay = line.When.ToLocalTime().Date;
+                if (day != localDay)
+                {
+                    day = localDay;
+                    var sameDay = filtered.Where(item => item.When.ToLocalTime().Date == localDay).ToList();
+                    <div class="day-head">
+                        <span>@localDay.ToString("dddd, MMM d")</span>
+                        <span class="muted">@sameDay.Count files · @TextFormat.Bytes(sameDay.Sum(item => item.Size))</span>
+                    </div>
+                }
+                <ChangeRow Title="@line.Title" File="@line.File" FullPath="@line.FullPath" From="@line.From" To="@line.To" RouteTip="@line.RouteTip" Size="@line.Size" Ago="@line.Ago" WhenText="@line.WhenText" Result="@line.Result" Error="@line.Error" />
             }
-        </MudText>
-        @if (!string.IsNullOrWhiteSpace(pair.Error))
-        {
-            <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">@pair.Error</MudAlert>
+            <div class="d-flex align-center justify-space-between mt-3">
+                <MudText Typo="Typo.caption" Class="muted">@filtered.Count files</MudText>
+                <div>
+                    <MudButton Disabled="@(_page == 0)" OnClick="() => _page--">Previous</MudButton>
+                    <MudButton Disabled="@((_page + 1) * PageSize >= filtered.Count)" OnClick="() => _page++">Next</MudButton>
+                </div>
+            </div>
         }
-        @if (sample.Count > 0)
+    </MudTabPanel>
+    <MudTabPanel Text="Waiting to copy">
+        <MudText Typo="Typo.body2" Class="mb-3">These files are on the source and not on the destination yet: missing, a different size, or newer. This is not a list of finished copies. Syncthing markers and partial files are left out.</MudText>
+        @foreach (var pair in _outbox)
         {
-            <MudTable Items="sample" Dense="true" Hover="true" Elevation="0" Class="mt-2">
-                <HeaderContent>
-                    <MudTh>Path</MudTh>
-                    <MudTh>Size</MudTh>
-                    <MudTh>Why</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd DataLabel="Path"><span class="path">@context.Path</span></MudTd>
-                    <MudTd DataLabel="Size">@TextFormat.Bytes(context.Size)</MudTd>
-                    <MudTd DataLabel="Why">@context.Reason</MudTd>
-                </RowTemplate>
-            </MudTable>
+            var sample = Sample(pair.SampleJson).Where(item => !NoiseFiles.IsJunk(item.Path)).ToList();
+            <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true" @key="pair.Id">
+                <div class="d-flex justify-space-between align-center flex-wrap gap-2">
+                    <div>
+                        <MudText Typo="Typo.h6">@pair.Name</MudText>
+                        <div>@ChangeText.Place(pair.SourcePath) → @ChangeText.Place(pair.Destination)</div>
+                    </div>
+                    <div>
+                        <MudChip T="string" Size="Size.Small">@pair.Status</MudChip>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="_busy" OnClick="() => Refresh(pair.Id)">Refresh</MudButton>
+                    </div>
+                </div>
+                <MudText Typo="Typo.body2" Class="mt-2">
+                    @pair.PendingCount files · @TextFormat.Bytes(pair.PendingBytes)
+                    @if (pair.LastScanUtc is not null)
+                    {
+                        <span class="muted"> · scanned @pair.LastScanUtc.Value.ToLocalTime().ToString("g")</span>
+                    }
+                </MudText>
+                @if (!string.IsNullOrWhiteSpace(pair.Error))
+                {
+                    <MudAlert Severity="Severity.Warning" Class="mt-2" Dense="true">@pair.Error</MudAlert>
+                }
+                @foreach (var file in sample)
+                {
+                    <div class="change-row" @key="file.Path">
+                        <div class="change-main">
+                            <div class="change-title">@ChangeText.Split(file.Path).Title</div>
+                            <div class="change-file">@file.Path</div>
+                        </div>
+                        <div class="change-meta">
+                            <span>@TextFormat.Bytes(file.Size)</span>
+                            <span class="status-badge badge-wait">@file.Reason</span>
+                        </div>
+                    </div>
+                }
+            </MudPaper>
         }
-    </MudPaper>
-}
-
-@if (_pairs.Count == 0)
-{
-    <MudAlert Severity="Severity.Info">No outbox pairs yet. Add one in Settings.</MudAlert>
-}
+        @if (_outbox.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info">No waiting-to-copy pairs yet. Add one in Settings.</MudAlert>
+        }
+    </MudTabPanel>
+</MudTabs>
 
 @code {
-    private List<OutboxPair> _pairs = [];
+    private const int PageSize = 40;
+    private List<OutboxPair> _outbox = [];
+    private IReadOnlyList<HistoryRow> _rows = [];
+    private List<(string Key, string Label)> _pairs = [];
+    private string _search = "";
+    private string _result = "all";
+    private string _pair = "";
+    private string _range = "7";
+    private int _page;
     private bool _busy;
     private PeriodicTimer? _timer;
 
@@ -90,7 +158,59 @@
     private async Task Reload()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        _pairs = await db.OutboxPairs.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+        _outbox = await db.OutboxPairs.AsNoTracking().OrderBy(item => item.Name).ToListAsync();
+        _rows = await Log.ListAsync(8000);
+        _pairs = _rows
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourcePath))
+            .GroupBy(item => FolderBoards.KeyFor(item.SourcePath, item.DestinationPath))
+            .Select(group => (group.Key, ChangeText.Place(group.First().SourcePath) + " → " + ChangeText.Place(group.First().DestinationPath)))
+            .OrderBy(item => item.Item2, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private string Summary()
+    {
+        var now = Clock.GetUtcNow();
+        var rows = _rows.Where(item => item.Ok && item.CompletedUtc >= now.AddHours(-24));
+        if (!string.IsNullOrEmpty(_pair))
+            rows = rows.Where(item => FolderBoards.KeyFor(item.SourcePath, item.DestinationPath) == _pair);
+        var list = rows.ToList();
+        return list.Count + " files · " + TextFormat.Bytes(list.Sum(item => item.Size)) + " copied in last 24h";
+    }
+
+    private List<ChangeLine> Filtered()
+    {
+        var now = Clock.GetUtcNow();
+        DateTimeOffset sinceUtc;
+        if (_range == "today")
+        {
+            var local = now.ToLocalTime();
+            sinceUtc = new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset).ToUniversalTime();
+        }
+        else
+            sinceUtc = now.AddDays(_range == "30" ? -30 : -7);
+
+        IEnumerable<HistoryRow> query = _rows.Where(item => item.CompletedUtc >= sinceUtc);
+        if (!string.IsNullOrEmpty(_pair))
+            query = query.Where(item => FolderBoards.KeyFor(item.SourcePath, item.DestinationPath) == _pair);
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            query = query.Where(item =>
+                (item.Name ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.SourcePath ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.DestinationPath ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.Error ?? "").Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var lines = query.Select(item => ChangeText.Line(item, null, null, now)).OrderByDescending(item => item.When).ToList();
+        if (_result == "copied")
+            lines = lines.Where(item => item.Result == "copied").ToList();
+        else if (_result == "failed")
+            lines = lines.Where(item => item.Result != "copied").ToList();
+        if (_page > 0 && _page * PageSize >= lines.Count)
+            _page = 0;
+        return lines;
     }
 
     private async Task Refresh(int id)
@@ -101,7 +221,7 @@
             await Store.RequestRefreshAsync(id);
             await Outbox.ScanAsync(id, CancellationToken.None);
             await Reload();
-            Snackbar.Add("Outbox refreshed.", Severity.Success);
+            Snackbar.Add("Waiting list refreshed.", Severity.Success);
         }
         catch (Exception ex)
         {

@@ -1,34 +1,57 @@
 @inject TransferLog Log
+@inject TimeProvider Clock
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6">Recent changes</MudText>
+        <MudText Typo="Typo.h6">@(FailedOnly ? "Failed items" : "Recent changes")</MudText>
     </TitleContent>
     <DialogContent>
-        @if (_rows.Count == 0)
+        @if (!_ready)
         {
-            <MudText>No finished copies have been recorded yet.</MudText>
+            <MudProgressLinear Indeterminate="true" />
         }
         else
         {
-            <MudTable Items="_rows" Dense="true" Hover="true" Elevation="0" Breakpoint="Breakpoint.Sm">
-                <HeaderContent>
-                    <MudTh>When</MudTh>
-                    <MudTh>File</MudTh>
-                    <MudTh>From</MudTh>
-                    <MudTh>To</MudTh>
-                    <MudTh>Size</MudTh>
-                    <MudTh>Result</MudTh>
-                </HeaderContent>
-                <RowTemplate>
-                    <MudTd>@context.CompletedUtc.ToLocalTime().ToString("g")</MudTd>
-                    <MudTd><span class="path">@context.Name</span></MudTd>
-                    <MudTd><span class="path">@context.SourcePath</span></MudTd>
-                    <MudTd><span class="path">@context.DestinationPath</span></MudTd>
-                    <MudTd>@TextFormat.Bytes(context.Size)</MudTd>
-                    <MudTd>@(context.Ok ? "Copied" : context.Error ?? "Failed")</MudTd>
-                </RowTemplate>
-            </MudTable>
+            Apply();
+            <MudText Typo="Typo.body2" Class="mb-3">@_summary</MudText>
+            <div class="limit-row">
+                <MudTextField @bind-Value="_search" Immediate="true" DebounceInterval="200" Label="Search" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <MudSelect T="string" @bind-Value="_result" Label="Result" Variant="Variant.Outlined" Margin="Margin.Dense" AnchorOrigin="Origin.BottomCenter">
+                    <MudSelectItem T="string" Value="@("all")">All</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("copied")">Copied</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("failed")">Failed</MudSelectItem>
+                </MudSelect>
+                <MudSelect T="string" @bind-Value="_pair" Label="Copy" Variant="Variant.Outlined" Margin="Margin.Dense" AnchorOrigin="Origin.BottomCenter">
+                    <MudSelectItem T="string" Value="@("")">All copies</MudSelectItem>
+                    @foreach (var pair in _pairs)
+                    {
+                        <MudSelectItem T="string" Value="@pair.Key">@pair.Label</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudSelect T="string" @bind-Value="_range" Label="When" Variant="Variant.Outlined" Margin="Margin.Dense" AnchorOrigin="Origin.BottomCenter">
+                    <MudSelectItem T="string" Value="@("today")">Today</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("7")">7 days</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("30")">30 days</MudSelectItem>
+                </MudSelect>
+            </div>
+            @if (_pageRows.Count == 0)
+            {
+                <MudText Class="mt-3">Nothing matches.</MudText>
+            }
+            else
+            {
+                @foreach (var line in _pageRows)
+                {
+                    <ChangeRow Title="@line.Title" File="@line.File" FullPath="@line.FullPath" From="@line.From" To="@line.To" RouteTip="@line.RouteTip" Size="@line.Size" Ago="@line.Ago" WhenText="@line.WhenText" Result="@line.Result" Error="@line.Error" />
+                }
+                <div class="d-flex align-center justify-space-between mt-3">
+                    <MudText Typo="Typo.caption" Class="muted">@_filtered.Count files</MudText>
+                    <div>
+                        <MudButton Disabled="@(_page == 0)" OnClick="Previous">Previous</MudButton>
+                        <MudButton Disabled="@(!HasNext)" OnClick="Next">Next</MudButton>
+                    </div>
+                </div>
+            }
         }
     </DialogContent>
     <DialogActions>
@@ -37,11 +60,116 @@
 </MudDialog>
 
 @code {
-    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    private const int PageSize = 40;
+    private bool _ready;
+    private string _search = "";
+    private string _result = "all";
+    private string _pair = "";
+    private string _range = "7";
+    private string _openedKey = "";
+    private int _page;
     private IReadOnlyList<HistoryRow> _rows = [];
+    private List<ChangeLine> _filtered = [];
+    private List<ChangeLine> _pageRows = [];
+    private List<(string Key, string Label)> _pairs = [];
+    private string _summary = "";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? SourcePath { get; set; }
+    [Parameter] public string? DestinationPath { get; set; }
+    [Parameter] public bool FailedOnly { get; set; }
+
+    private bool HasNext => (_page + 1) * PageSize < _filtered.Count;
 
     protected override async Task OnInitializedAsync()
-        => _rows = await Log.RecentAsync(false, 200);
+    {
+        if (FailedOnly)
+            _result = "failed";
+        if (!string.IsNullOrWhiteSpace(SourcePath))
+        {
+            _openedKey = FolderBoards.KeyFor(SourcePath, DestinationPath);
+            _pair = _openedKey;
+        }
+
+        _rows = await Log.ListAsync(8000);
+        _pairs = _rows
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourcePath))
+            .GroupBy(item => FolderBoards.KeyFor(item.SourcePath, item.DestinationPath))
+            .Select(group => (group.Key, ChangeText.Place(group.First().SourcePath) + " → " + ChangeText.Place(group.First().DestinationPath)))
+            .OrderBy(item => item.Item2, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (_openedKey.Length > 0 && _pairs.All(item => item.Key != _openedKey))
+            _pairs.Insert(0, (_openedKey, ChangeText.Place(SourcePath) + " → " + ChangeText.Place(DestinationPath)));
+        Apply();
+        _ready = true;
+    }
+
+    protected override void OnParametersSet() => Apply();
+
+    private void Apply()
+    {
+        if (!_ready && _rows.Count == 0)
+            return;
+        var now = Clock.GetUtcNow();
+        DateTimeOffset sinceUtc;
+        if (_range == "today")
+        {
+            var local = now.ToLocalTime();
+            sinceUtc = new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, local.Offset).ToUniversalTime();
+        }
+        else
+            sinceUtc = now.AddDays(_range == "30" ? -30 : -7);
+        IEnumerable<HistoryRow> query = _rows.Where(item => item.CompletedUtc >= sinceUtc);
+        if (!string.IsNullOrEmpty(_pair))
+        {
+            query = query.Where(item =>
+            {
+                var key = string.IsNullOrWhiteSpace(item.SourcePath) ? "" : FolderBoards.KeyFor(item.SourcePath, item.DestinationPath);
+                return key == _pair || (key.Length == 0 && _pair == _openedKey);
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var term = _search.Trim();
+            query = query.Where(item =>
+                (item.Name ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.SourcePath ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.DestinationPath ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                || (item.Error ?? "").Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var lines = query.Select(item => ChangeText.Line(item, SourcePath, DestinationPath, now)).OrderByDescending(item => item.When).ToList();
+        if (_result == "copied")
+            lines = lines.Where(item => item.Result == "copied").ToList();
+        else if (_result == "failed")
+            lines = lines.Where(item => item.Result != "copied").ToList();
+
+        var dayAgo = now.AddHours(-24);
+        var recent = lines.Where(item => item.Result == "copied" && item.When >= dayAgo).ToList();
+        if (_result == "failed")
+            recent = lines.Where(item => item.When >= dayAgo).ToList();
+        var bytes = recent.Sum(item => item.Size);
+        _summary = recent.Count + " files · " + TextFormat.Bytes(bytes) + (_result == "failed" ? " failed in last 24h" : " copied in last 24h");
+        _filtered = lines;
+        if (_page * PageSize >= Math.Max(_filtered.Count, 1))
+            _page = 0;
+        _pageRows = _filtered.Skip(_page * PageSize).Take(PageSize).ToList();
+    }
+
+    private void Previous()
+    {
+        if (_page > 0)
+            _page--;
+        Apply();
+    }
+
+    private void Next()
+    {
+        if (HasNext)
+            _page++;
+        Apply();
+    }
 
     private void Close() => MudDialog.Close();
 }

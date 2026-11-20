@@ -102,6 +102,56 @@ html, body {
     margin: .5rem 0;
 }
 
+.change-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .35rem 1rem;
+    align-items: center;
+    padding: .7rem 0;
+    border-bottom: 1px solid var(--mud-palette-lines-default);
+}
+
+.change-title {
+    font-weight: 650;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.change-file, .change-route {
+    color: var(--mud-palette-text-secondary);
+    font-size: .85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.change-meta {
+    display: flex;
+    gap: .65rem;
+    align-items: center;
+    white-space: nowrap;
+}
+
+.day-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-top: 1.1rem;
+    font-weight: 650;
+}
+
+@media (max-width: 700px) {
+    .change-row {
+        grid-template-columns: 1fr;
+    }
+
+    .change-meta {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
+
 .copy-block {
     background: var(--mud-palette-background-gray);
     border-radius: 8px;

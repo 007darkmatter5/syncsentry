@@ -20,7 +20,7 @@ public sealed class RunNowService(
     public async Task<RunNowResult> StartAsync(Guid jobId, CancellationToken cancellationToken)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var job = await db.Jobs.Include(item => item.LogSource).FirstOrDefaultAsync(item => item.Id == jobId, cancellationToken);
+        var job = await db.Jobs.Include(item => item.LogSource).OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == jobId, cancellationToken);
         var settings = await db.Settings.OrderBy(item => item.Id).FirstAsync(cancellationToken);
         if (job is null)
             return new RunNowResult(false, "That job no longer exists.");

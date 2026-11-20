@@ -1,3 +1,5 @@
+using SyncSentry.Jobs;
+
 namespace SyncSentry.Outbox;
 
 public sealed record FileFingerprint(string RelativePath, long Size, long MtimeSeconds);
@@ -43,6 +45,8 @@ public static class OutboxComparer
         {
             var path = Normalize(file.RelativePath);
             if (path.Length == 0 || path.StartsWith("../", StringComparison.Ordinal) || path == "..")
+                continue;
+            if (NoiseFiles.IsJunk(path))
                 continue;
             string? reason = null;
             if (!dest.TryGetValue(path, out var other))

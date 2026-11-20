@@ -15,6 +15,7 @@ public sealed class ThemePreferenceService(IDbContextFactory<ApplicationDbContex
         await using var db = await factory.CreateDbContextAsync();
         return await db.UserPreferences.AsNoTracking()
             .Where(item => item.UserId == id)
+            .OrderBy(item => item.Id)
             .Select(item => (bool?)item.DarkMode)
             .FirstOrDefaultAsync();
     }
@@ -25,7 +26,7 @@ public sealed class ThemePreferenceService(IDbContextFactory<ApplicationDbContex
         if (id is null)
             return;
         await using var db = await factory.CreateDbContextAsync();
-        var row = await db.UserPreferences.FirstOrDefaultAsync(item => item.UserId == id);
+        var row = await db.UserPreferences.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.UserId == id);
         if (row is null)
         {
             row = new UserPreference { UserId = id, DarkMode = dark };

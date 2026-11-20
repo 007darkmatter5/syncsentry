@@ -103,6 +103,9 @@ public sealed class LiveCopyPoller(
     TimeProvider clock) : BackgroundService
 {
     private static readonly DateTimeOffset Started = DateTimeOffset.UtcNow;
+    private string _lastSource = "";
+    private string _lastDestination = "";
+    private DateTimeOffset _lastPlaceUtc;
     private int _busy;
     private double? _lastElapsed;
     private string? _lastApplied;
@@ -178,7 +181,7 @@ public sealed class LiveCopyPoller(
         {
             foreach (var job in mounts.Current.Jobs.Where(item => item.Origin == "log" && item.Status == "running"))
             {
-                var definition = await context.Jobs.AsNoTracking().FirstOrDefaultAsync(item => item.Id == job.DefinitionId, cancellationToken);
+                var definition = await context.Jobs.AsNoTracking().OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == job.DefinitionId, cancellationToken);
                 copies.Add(new CopyCard(
                     definition?.Source ?? "",
                     definition?.Destination ?? "",
@@ -197,7 +200,8 @@ public sealed class LiveCopyPoller(
             }
         }
 
-        var finished = (snapshot.Finished ?? [])
+        var finishedSource = AttachPlaces(snapshot.Finished ?? [], copies, now);
+        var finished = finishedSource
             .Take(50)
             .Select(item => new FinishedFileRow(
                 item.Name,
@@ -212,7 +216,7 @@ public sealed class LiveCopyPoller(
             .ToArray();
 
         var historyDays = settings.HistoryDays <= 0 ? 30 : settings.HistoryDays;
-        await transfers.RememberAsync(snapshot.Finished ?? [], historyDays, now, cancellationToken);
+        await transfers.RememberAsync(finishedSource, historyDays, now, cancellationToken);
         var history = await transfers.RecentAsync(false, 400, cancellationToken);
         var saved = await context.Jobs.AsNoTracking().Where(item => item.Enabled).ToListAsync(cancellationToken);
         var panels = FolderBoards.Build(copies, files, history, saved, mountViews);
@@ -301,6 +305,34 @@ public sealed class LiveCopyPoller(
         return plus < 0 ? version : version[..plus];
     }
 
+    private IReadOnlyList<RcFinished> AttachPlaces(IReadOnlyList<RcFinished> finished, IReadOnlyList<CopyCard> copies, DateTimeOffset now)
+    {
+        var known = copies.Where(item => !string.IsNullOrWhiteSpace(item.SourcePath) && !string.IsNullOrWhiteSpace(item.DestinationPath)).ToArray();
+        if (known.Length == 1)
+        {
+            _lastSource = known[0].SourcePath;
+            _lastDestination = known[0].DestinationPath;
+            _lastPlaceUtc = now;
+        }
+
+        var fresh = now - _lastPlaceUtc < TimeSpan.FromMinutes(10) && _lastSource.Length > 0;
+        return finished
+            .Where(item => !NoiseFiles.IsJunk(item.Name))
+            .Select(item =>
+            {
+                if (!string.IsNullOrWhiteSpace(item.Source) && !string.IsNullOrWhiteSpace(item.Destination))
+                    return item;
+                if (!fresh)
+                    return item;
+                return item with
+                {
+                    Source = string.IsNullOrWhiteSpace(item.Source) ? _lastSource : item.Source,
+                    Destination = string.IsNullOrWhiteSpace(item.Destination) ? _lastDestination : item.Destination
+                };
+            })
+            .ToArray();
+    }
+
     private static bool HasActivity(RcStats stats)
         => stats.Transferring.Count > 0 || stats.Speed > 1 || (stats.TotalBytes > 0 && stats.Bytes > 0 && stats.Bytes < stats.TotalBytes);
 
@@ -336,6 +368,8 @@ public sealed class LiveCopyPoller(
                 note));
             foreach (var file in group)
             {
+                if (NoiseFiles.IsJunk(file.Name))
+                    continue;
                 files.Add(new LiveFileRow(
                     file.Name,
                     file.Source,

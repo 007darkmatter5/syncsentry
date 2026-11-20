@@ -82,8 +82,8 @@
                                 {
                                     <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="@_busy" OnClick="() => Run(panel.SavedTaskId.Value)">Run now</MudButton>
                                 }
-                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="Failed">Show failed items</MudButton>
-                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="Recent">Recent changes</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => Failed(panel)">Show failed items</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => Recent(panel)">Recent changes</MudButton>
                             </div>
                         </ChildContent>
                     </MudExpansionPanel>
@@ -187,9 +187,21 @@
         _busy = false;
     }
 
-    private Task Recent() => Dialogs.ShowAsync<RecentChangesDialog>("Recent changes");
+    private Task Recent(FolderPanel panel) => OpenChanges(panel, false);
 
-    private Task Failed() => Dialogs.ShowAsync<FailedItemsDialog>("Failed items");
+    private Task Failed(FolderPanel panel) => OpenChanges(panel, true);
+
+    private Task OpenChanges(FolderPanel panel, bool failed)
+    {
+        var parameters = new DialogParameters<RecentChangesDialog>
+        {
+            { item => item.SourcePath, panel.SourcePath },
+            { item => item.DestinationPath, panel.DestinationPath },
+            { item => item.FailedOnly, failed }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true };
+        return Dialogs.ShowAsync<RecentChangesDialog>(failed ? "Failed items" : "Recent changes", parameters, options);
+    }
 
     private static string BadgeClass(string status) => status switch
     {

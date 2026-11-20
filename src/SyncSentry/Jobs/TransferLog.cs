@@ -24,6 +24,8 @@ public sealed class TransferLog(IDbContextFactory<ApplicationDbContext> factory)
             var known = existing.ToHashSet(StringComparer.Ordinal);
             foreach (var row in rows)
             {
+                if (NoiseFiles.IsJunk(row.Item.Name))
+                    continue;
                 if (!known.Add(row.Key))
                     continue;
                 db.TransferEvents.Add(new TransferEvent
@@ -56,7 +58,23 @@ public sealed class TransferLog(IDbContextFactory<ApplicationDbContext> factory)
         if (failedOnly)
             query = query.Where(item => !item.Ok);
         var rows = await query.OrderByDescending(item => item.Id).Take(Math.Clamp(take, 1, 500)).ToListAsync(cancellationToken);
-        return rows.Select(item => new HistoryRow(item.Name, item.Size, item.CompletedUtc, item.Ok, item.Error, item.SourcePath, item.DestinationPath)).ToArray();
+        return rows
+            .Where(item => !NoiseFiles.IsJunk(item.Name))
+            .Select(item => new HistoryRow(item.Name, item.Size, item.CompletedUtc, item.Ok, item.Error, item.SourcePath, item.DestinationPath))
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<HistoryRow>> ListAsync(int take, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var rows = await db.TransferEvents.AsNoTracking()
+            .OrderByDescending(item => item.Id)
+            .Take(Math.Clamp(take, 1, 8000))
+            .ToListAsync(cancellationToken);
+        return rows
+            .Where(item => !NoiseFiles.IsJunk(item.Name))
+            .Select(item => new HistoryRow(item.Name, item.Size, item.CompletedUtc, item.Ok, item.Error, item.SourcePath, item.DestinationPath))
+            .ToArray();
     }
 
     public static string DedupeKey(RcFinished item)

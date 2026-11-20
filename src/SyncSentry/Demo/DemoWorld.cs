@@ -46,23 +46,21 @@ public sealed class DemoRclone : IRcloneRc
     public DemoRclone()
     {
         _jobs.Add(Sample(7, "syncsentry-demo"));
-        _finished.Add(new RcFinished(
-            "Movies/Already-There.mkv",
-            2_200_000_000,
-            DateTimeOffset.Parse("2026-11-19T21:40:00Z"),
-            true,
-            null,
-            "/mnt/remotes/UNASPRO_Media/Movies",
-            "/mnt/user/data/media/Movies"));
-        _finished.Add(new RcFinished(
-            "Movies/Skipped.mkv",
-            800_000_000,
-            DateTimeOffset.Parse("2026-11-19T21:50:00Z"),
-            false,
-            "connection reset",
-            "/mnt/remotes/UNASPRO_Media/Movies",
-            "/mnt/user/data/media/Movies"));
+        var now = DateTimeOffset.UtcNow;
+        AddFinished("A Few Good Men (1992)/A Few Good Men (1992).mkv", 8_600_000_000, now.AddMinutes(-25), true, null);
+        AddFinished("A Few Good Men (1992)/English.srt", 42_000, now.AddMinutes(-24), true, null);
+        AddFinished("The Matrix (1999)/The Matrix (1999).mkv", 14_200_000_000, now.AddHours(-5), true, null);
+        AddFinished("The Matrix (1999)/English.srt", 51_000, now.AddHours(-5), true, null);
+        AddFinished("Heat (1995)/Heat (1995).mkv", 9_100_000_000, now.AddHours(-3), false, "connection reset");
+        AddFinished("Inception (2010)/Inception (2010).mkv", 12_400_000_000, now.AddDays(-1).AddHours(-2), true, null);
+        AddFinished("Inception (2010)/Inception (2010).mkv.partial", 80_000_000, now.AddMinutes(-2), true, null);
+        AddFinished(".stfolder/syncthing-folder-demo.txt", 120, now.AddMinutes(-2), true, null);
+        AddFinished("~syncthing~Inception.tmp", 4096, now.AddMinutes(-1), true, null);
+        AddFinished(".rclone-upload.tmp", 2048, now.AddMinutes(-1), false, "temp");
     }
+
+    private void AddFinished(string name, long size, DateTimeOffset when, bool ok, string? error)
+        => _finished.Add(new RcFinished(name, size, when, ok, error, "/mnt/remotes/UNASPRO_Media/Movies", "/mnt/user/data/media/Movies"));
 
     public Task<RcSnapshot> GetSnapshotAsync(string? url, string? user, string? password, CancellationToken cancellationToken)
     {

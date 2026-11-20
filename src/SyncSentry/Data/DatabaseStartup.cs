@@ -133,11 +133,11 @@ public static class DatabaseStartup
         setting.UpdatedUtc = now;
         Directory.CreateDirectory(setting.TriggerDirectory);
 
-        var log = await db.LogSources.FirstOrDefaultAsync();
+        var log = await db.LogSources.OrderBy(item => item.Id).FirstOrDefaultAsync();
         if (log is not null)
             log.Path = Path.Combine(DemoFiles.Root, "initial-copy.log");
 
-        var pair = await db.OutboxPairs.FirstOrDefaultAsync(item => item.DestinationKind == "path");
+        var pair = await db.OutboxPairs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.DestinationKind == "path");
         if (pair is not null)
         {
             pair.SourcePath = Path.Combine(DemoFiles.Root, "src");
@@ -160,7 +160,7 @@ public static class DatabaseStartup
             });
         }
 
-        var demoCopy = await db.Jobs.FirstOrDefaultAsync(item => item.StartMode == "rc");
+        var demoCopy = await db.Jobs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.StartMode == "rc");
         if (demoCopy is null)
         {
             demoCopy = new SyncJobDefinition { Id = Guid.NewGuid(), StartMode = "rc", Operation = "copy" };

@@ -305,7 +305,7 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var row = edit.Id == Guid.Empty
             ? null
-            : await db.Jobs.FirstOrDefaultAsync(item => item.Id == edit.Id, cancellationToken);
+            : await db.Jobs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == edit.Id, cancellationToken);
         if (row is null)
         {
             row = new SyncJobDefinition { Id = Guid.NewGuid() };
@@ -330,7 +330,7 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
     public async Task DeleteJobAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var row = await db.Jobs.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        var row = await db.Jobs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (row is null)
             return;
         db.Jobs.Remove(row);
@@ -377,7 +377,7 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var row = edit.Id == 0
             ? null
-            : await db.OutboxPairs.FirstOrDefaultAsync(item => item.Id == edit.Id, cancellationToken);
+            : await db.OutboxPairs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == edit.Id, cancellationToken);
         if (row is null)
         {
             row = new OutboxPair();
@@ -397,7 +397,7 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
     public async Task DeleteOutboxAsync(int id, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var row = await db.OutboxPairs.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        var row = await db.OutboxPairs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (row is null)
             return;
         db.OutboxPairs.Remove(row);
@@ -462,7 +462,7 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
     public async Task RequestRefreshAsync(int id, CancellationToken cancellationToken = default)
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var row = await db.OutboxPairs.FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        var row = await db.OutboxPairs.OrderBy(item => item.Id).FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (row is null)
             return;
         row.ForceRefresh = true;
