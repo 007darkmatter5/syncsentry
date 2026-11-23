@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using SyncSentry.Customizations;
 using SyncSentry.Host;
 using SyncSentry.Outbox;
 using SyncSentry.Rclone;
@@ -248,6 +249,7 @@ public static class DemoFiles
 
         var tail = Path.Combine(Root, "tailscale.json");
         File.WriteAllText(tail, "{\"acceptRoutes\": true, \"backendState\": \"Running\"}\n");
+        File.WriteAllText(Path.Combine(Root, "unraid-customizations.json"), CustomizationsSample.Json);
     }
 
     private static void WriteFile(string path, int bytes, DateTime written)

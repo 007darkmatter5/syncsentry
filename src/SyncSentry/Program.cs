@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 using SyncSentry.Alerts;
 using SyncSentry.Components;
+using SyncSentry.Customizations;
 using SyncSentry.Components.Account;
 using SyncSentry.Data;
 using SyncSentry.Demo;
@@ -99,6 +100,7 @@ builder.Services.AddSingleton(new DemoInboxHolder(AppFlags.Demo(builder.Configur
 builder.Services.AddSingleton<LiveBoard>();
 builder.Services.AddSingleton<LiveCopyBoard>();
 builder.Services.AddSingleton<TransferLog>();
+builder.Services.AddSingleton<CustomizationsReader>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<SetupService>();
 builder.Services.AddSingleton<RunNowService>();

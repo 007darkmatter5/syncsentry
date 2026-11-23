@@ -1,0 +1,264 @@
+@page "/customizations"
+@inject CustomizationsReader Catalog
+@inject IJSRuntime Js
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<PageTitle>Customizations · SyncSentry</PageTitle>
+
+<div class="kicker">Notes</div>
+<MudText Typo="Typo.h4" GutterBottom="true">Customizations</MudText>
+<MudText Typo="Typo.body2" Class="mb-3 muted">Changes recorded for your Unraid servers. This page only reads the file. It does not change a server.</MudText>
+
+@if (_file is null)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    <div class="d-flex justify-space-between align-center flex-wrap gap-2 mb-3">
+        <div>
+            <div>Generated @_file.GeneratedAt?.ToLocalTime().ToString("g")</div>
+            <div class="muted">Last checked @_file.LastVerified?.ToLocalTime().ToString("g")</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            @foreach (var count in _file.Counts)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@count.Label @count.Value</MudChip>
+            }
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Refresh">Refresh</MudButton>
+        </div>
+    </div>
+
+    @if (!_file.Ok)
+    {
+        <MudAlert Severity="@(_file.Problem?.StartsWith("No customizations file", StringComparison.Ordinal) == true ? Severity.Info : Severity.Warning)" Variant="Variant.Outlined">
+            @_file.Problem
+            <div class="path mt-2">@_file.Path</div>
+        </MudAlert>
+    }
+    else
+    {
+        <div class="limit-row">
+            <MudSelect T="string" @bind-Value="_server" Label="Server" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("")">All servers</MudSelectItem>
+                @foreach (var server in Servers)
+                {
+                    <MudSelectItem T="string" Value="@server">@server</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_category" Label="Category" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("")">All categories</MudSelectItem>
+                @foreach (var category in Categories)
+                {
+                    <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_active" Label="Active" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("")">Any</MudSelectItem>
+                <MudSelectItem T="string" Value="@("yes")">Yes</MudSelectItem>
+                <MudSelectItem T="string" Value="@("no")">No</MudSelectItem>
+                <MudSelectItem T="string" Value="@("unknown")">Unknown</MudSelectItem>
+            </MudSelect>
+            <MudSelect T="string" @bind-Value="_tag" Label="Tag" Variant="Variant.Outlined" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("")">Any tag</MudSelectItem>
+                @foreach (var tag in Tags)
+                {
+                    <MudSelectItem T="string" Value="@tag">@tag</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="_search" Immediate="true" Label="Search" Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </div>
+
+        <MudTabs Rounded="true" ApplyEffectsToContainer="true" Class="mt-2 custom-tabs">
+            <MudTabPanel Text="@ChangeTab">
+                @if (Pinned.Any())
+                {
+                    <MudText Typo="Typo.subtitle1" Class="mt-2">Check these before you work</MudText>
+                    @foreach (var change in Pinned)
+                    {
+                        <ChangeCard Change="change" CopyPath="Copy" @key="@("pin-" + change.Id)" />
+                    }
+                }
+                <MudText Typo="Typo.subtitle1" Class="mt-3">All matching changes</MudText>
+                @if (!Shown.Any())
+                {
+                    <MudText Class="muted">No changes match these filters.</MudText>
+                }
+                @foreach (var change in Shown)
+                {
+                    <ChangeCard Change="change" CopyPath="Copy" @key="change.Id" />
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="@PendingTab">
+                @if (!Pending.Any())
+                {
+                    <MudText Class="mt-2 muted">Nothing is waiting.</MudText>
+                }
+                @foreach (var item in Pending)
+                {
+                    <MudPaper Class="pa-3 mt-2" Elevation="0" Outlined="true" @key="item.Id">
+                        <div class="d-flex flex-wrap gap-2 align-center">
+                            <span class="status-badge badge-wait">@item.Id</span>
+                            <strong>@item.Title</strong>
+                            <span class="muted">@item.Server</span>
+                        </div>
+                        <div class="mt-2">@item.Detail</div>
+                        @if (!string.IsNullOrWhiteSpace(item.Source))
+                        {
+                            <div class="muted mt-1">From @item.Source</div>
+                        }
+                    </MudPaper>
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="@ObservationTab">
+                @if (!Observations.Any())
+                {
+                    <MudText Class="mt-2 muted">No observations.</MudText>
+                }
+                @foreach (var item in Observations)
+                {
+                    <MudPaper Class="pa-3 mt-2" Elevation="0" Outlined="true" @key="item.Id">
+                        <div class="d-flex flex-wrap gap-2 align-center">
+                            <span class="status-badge @SeverityClass(item.Severity)">@SeverityLabel(item.Severity)</span>
+                            <strong>@item.Title</strong>
+                            <span class="muted">@item.Server</span>
+                        </div>
+                        <div class="mt-2">@item.Detail</div>
+                    </MudPaper>
+                }
+            </MudTabPanel>
+        </MudTabs>
+    }
+}
+
+@code {
+    private CustomizationsSnapshot? _file;
+    private string _server = "";
+    private string _category = "";
+    private string _active = "";
+    private string _tag = "";
+    private string _search = "";
+    private PeriodicTimer? _timer;
+
+    private IEnumerable<string> Servers => (_file?.Servers ?? [])
+        .Concat(_file?.Changes.Select(item => item.Server) ?? [])
+        .Concat(_file?.Pending.Select(item => item.Server) ?? [])
+        .Concat(_file?.Observations.Select(item => item.Server) ?? [])
+        .Where(item => !string.IsNullOrWhiteSpace(item))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(item => item, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> Categories => (_file?.Changes ?? [])
+        .Select(item => item.Category)
+        .Where(item => !string.IsNullOrWhiteSpace(item))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(item => item, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> Tags => (_file?.Changes ?? [])
+        .SelectMany(item => item.Tags)
+        .Where(item => !string.IsNullOrWhiteSpace(item))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(item => item, StringComparer.OrdinalIgnoreCase);
+
+    private string ChangeTab => "Changes (" + Shown.Count() + ")";
+    private string PendingTab => "Pending (" + Pending.Count() + ")";
+    private string ObservationTab => "Observations (" + Observations.Count() + ")";
+
+    private IEnumerable<ChangeRecord> Shown => (_file?.Changes ?? []).Where(Matches);
+
+    private IEnumerable<ChangeRecord> Pinned => Shown.Where(item => item.MustCheck);
+
+    private IEnumerable<PendingRecord> Pending => (_file?.Pending ?? []).Where(item => ServerOk(item.Server) && TextOk(item.Title, item.Detail, item.Id));
+
+    private IEnumerable<ObservationRecord> Observations => (_file?.Observations ?? []).Where(item => ServerOk(item.Server) && TextOk(item.Title, item.Detail, item.Id));
+
+    protected override void OnInitialized()
+    {
+        _file = Catalog.Load();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+            {
+                var next = Catalog.Load();
+                if (Same(next, _file))
+                    continue;
+                _file = next;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void Refresh() => _file = Catalog.Load(force: true);
+
+    private bool Matches(ChangeRecord change)
+        => ServerOk(change.Server)
+            && (string.IsNullOrEmpty(_category) || change.Category.Equals(_category, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrEmpty(_active) || change.Active.Equals(_active, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrEmpty(_tag) || change.Tags.Any(tag => tag.Equals(_tag, StringComparison.OrdinalIgnoreCase)))
+            && TextOk(change.Title, change.Summary, change.Id, change.Why, change.Before, change.After, string.Join(' ', change.Tags), string.Join(' ', change.Files));
+
+    private bool ServerOk(string server)
+        => string.IsNullOrEmpty(_server) || server.Equals(_server, StringComparison.OrdinalIgnoreCase);
+
+    private bool TextOk(params string?[] fields)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+            return true;
+        return fields.Any(field => field?.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    private async Task Copy(string text)
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("syncsentryCopy", text);
+            Snackbar.Add("Copied.", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Select the path and copy it.", Severity.Info);
+        }
+    }
+
+    private static string SeverityLabel(string severity)
+    {
+        var value = severity.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "error" or "critical" or "high" => "High",
+            "warning" or "medium" => "Warning",
+            "info" or "low" or "note" => "Info",
+            _ => string.IsNullOrWhiteSpace(severity) ? "Note" : severity
+        };
+    }
+
+    private static string SeverityClass(string severity)
+    {
+        var value = severity.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "error" or "critical" or "high" => "badge-error",
+            "warning" or "medium" => "badge-wait",
+            _ => "badge-copy"
+        };
+    }
+
+    private static bool Same(CustomizationsSnapshot next, CustomizationsSnapshot? current)
+        => current is not null
+            && next.Ok == current.Ok
+            && next.Problem == current.Problem
+            && next.ReadUtc == current.ReadUtc
+            && next.Path == current.Path;
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -12,6 +12,7 @@ It does not mount or unmount anything, and it does not write to media. mergerfs 
 - **Mounts.** The same locations in more detail: mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
 - **History.** Completed copies for the last 30 days: the folder, the file, where it went, the size, and whether it copied or failed. Syncthing markers, `.partial` files, and rclone temp files are hidden. **Waiting to copy** is the separate list of files still only on the source.
 - **Logs.** Tail, search, and level filter for the log files you configure.
+- **Customizations.** A read-only list of notes about changes on your Unraid servers, from a JSON file you mount in. The beta template maps `/mnt/cache/appdata/mediamanny/customizations` to `/customizations` and reads `/customizations/unraid-customizations.json` (`SyncSentry__Customizations__Path`).
 - **Run now.** Starts one saved job. It will not start a second copy of a job that is already running.
 - **Alerts.** Job failed, job completed, mount unresponsive, mount unmounted, Tailscale accept-routes off. Each one can be turned off. A test button sends one notification.
 

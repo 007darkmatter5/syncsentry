@@ -1,0 +1,97 @@
+<MudExpansionPanel Class="mt-2">
+    <TitleContent>
+        <div class="d-flex flex-wrap gap-2 align-center">
+            <span class="status-badge badge-unknown">@Change.Id</span>
+            <span>@Change.Title</span>
+            <span class="status-badge @ActiveClass(Change.Active)">@ActiveLabel(Change.Active)</span>
+            @if (Change.MustCheck)
+            {
+                <span class="status-badge badge-error">Check before work</span>
+            }
+            <span class="muted">@Change.Server</span>
+        </div>
+    </TitleContent>
+    <ChildContent>
+        @if (!string.IsNullOrWhiteSpace(Change.Summary))
+        {
+            <p>@Change.Summary</p>
+        }
+        <div class="kv"><span></span><span class="kv-key">Before</span><span class="kv-val">@Blank(Change.Before)</span></div>
+        <div class="kv"><span></span><span class="kv-key">After</span><span class="kv-val">@Blank(Change.After)</span></div>
+        <div class="kv"><span></span><span class="kv-key">Why</span><span class="kv-val">@Blank(Change.Why)</span></div>
+        <div class="kv"><span></span><span class="kv-key">Date</span><span class="kv-val">@Blank(Change.Date)</span></div>
+        <div class="kv"><span></span><span class="kv-key">Made by</span><span class="kv-val">@MadeBy(Change)</span></div>
+        <div class="kv"><span></span><span class="kv-key">Active</span><span class="kv-val">@Blank(Change.ActiveDetail)</span></div>
+        <div class="kv"><span></span><span class="kv-key">Verified</span><span class="kv-val">@Blank(Change.VerifiedAt)</span></div>
+        @if (Change.Warnings.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2" Variant="Variant.Outlined">@string.Join(" ", Change.Warnings)</MudAlert>
+        }
+        @if (Change.Files.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-3">Files</MudText>
+            @foreach (var path in Change.Files)
+            {
+                <div class="path-row">
+                    <span class="path">@path</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => CopyPath.InvokeAsync(path)">Copy</MudButton>
+                </div>
+            }
+        }
+        @if (Change.Backups.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-3">Backups</MudText>
+            @foreach (var path in Change.Backups)
+            {
+                <div class="path-row">
+                    <span class="path">@path</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="() => CopyPath.InvokeAsync(path)">Copy</MudButton>
+                </div>
+            }
+        }
+        @if (!string.IsNullOrWhiteSpace(Change.Undo))
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-3">Undo</MudText>
+            <pre class="copy-block">@Change.Undo</pre>
+        }
+        @if (Change.Tags.Count > 0)
+        {
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                @foreach (var tag in Change.Tags)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="@(tag.Equals("must-check-before-work", StringComparison.OrdinalIgnoreCase) ? Color.Error : Color.Default)">@tag</MudChip>
+                }
+            </div>
+        }
+    </ChildContent>
+</MudExpansionPanel>
+
+@code {
+    [Parameter, EditorRequired] public ChangeRecord Change { get; set; } = default!;
+    [Parameter] public EventCallback<string> CopyPath { get; set; }
+
+    private static string Blank(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private static string MadeBy(ChangeRecord change)
+    {
+        if (string.IsNullOrWhiteSpace(change.MadeBy) && string.IsNullOrWhiteSpace(change.MadeByConfidence))
+            return "—";
+        if (string.IsNullOrWhiteSpace(change.MadeByConfidence))
+            return change.MadeBy;
+        return change.MadeBy + " (" + change.MadeByConfidence + ")";
+    }
+
+    private static string ActiveLabel(string active) => active switch
+    {
+        "yes" => "Active",
+        "no" => "Not active",
+        _ => "Unknown"
+    };
+
+    private static string ActiveClass(string active) => active switch
+    {
+        "yes" => "badge-ok",
+        "no" => "badge-unknown",
+        _ => "badge-wait"
+    };
+}
