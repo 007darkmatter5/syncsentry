@@ -31,25 +31,28 @@ public sealed class FolderExists(IMountTable mounts, StuckProcesses stuck, TimeP
         var table = mounts.Read();
         foreach (var (key, relative) in paths)
         {
-            if (!FolderKey.IsSafe(relative))
-                continue;
-            var full = Combine(fullRoot, relative);
-            if (full is null)
-                continue;
-            if (TryCache(full, now, out var present))
+            foreach (var spelling in FolderKey.SeasonSpellings(relative))
             {
-                if (present)
-                    found.Add(key);
-                continue;
-            }
+                if (!FolderKey.IsSafe(spelling))
+                    continue;
+                var full = Combine(fullRoot, spelling);
+                if (full is null)
+                    continue;
+                if (TryCache(full, now, out var present))
+                {
+                    if (present)
+                        found.Add(key);
+                    continue;
+                }
 
-            if (IsHung(full))
-                continue;
-            var covering = MountInfo.FindCovering(table, full);
-            if (MountRisk.PathNeedsIsolation(full, covering))
-                isolated.Add((key, full));
-            else
-                local.Add((key, full));
+                if (IsHung(full))
+                    continue;
+                var covering = MountInfo.FindCovering(table, full);
+                if (MountRisk.PathNeedsIsolation(full, covering))
+                    isolated.Add((key, full));
+                else
+                    local.Add((key, full));
+            }
         }
 
         foreach (var (key, full) in local)
@@ -258,7 +261,7 @@ public sealed class PipelineRefresher(
         var arrItems = sonarr.Items.Concat(radarr.Items).Concat(lidarr.Items).ToList();
         plexFetch = demo
             ? plexFetch
-            : await FetchPlexAsync(setting.PlexUrl, plexToken, PlexMatch.From(arrItems, UnasPushLog.Fold(lines)), cancellationToken);
+            : await FetchPlexAsync(setting.PlexUrl, plexToken, cancellationToken);
         var checks = DiskChecks(arrItems, lines);
         var present = await folders.PresentAsync(unasRoot, checks, cancellationToken);
         var sources = demo
@@ -289,11 +292,11 @@ public sealed class PipelineRefresher(
         return await arr.FetchAsync(app, url.Trim(), apiKey!, since, cancellationToken);
     }
 
-    private async Task<PlexFetch> FetchPlexAsync(string url, string? token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken)
+    private async Task<PlexFetch> FetchPlexAsync(string url, string? token, CancellationToken cancellationToken)
     {
         if (!Configured(url, token))
             return PlexFetch.NotConfigured;
-        return await plex.FetchAsync(url.Trim(), token!, queries, cancellationToken);
+        return await plex.FetchAsync(url.Trim(), token!, cancellationToken);
     }
 
     private string? Unprotect(string protectedValue)

@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
 namespace SyncSentry.Pipeline;
 
 public static class PipelinePaths
@@ -64,6 +67,8 @@ public static class MediaLibrary
 
 public static class FolderKey
 {
+    private static readonly Regex SeasonFolder = new(@"^season\s+0*(?<n>[1-9]\d*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public static string Normalize(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -74,10 +79,49 @@ public static class FolderKey
         return text.Trim('/');
     }
 
+    /// <summary>Season 04 and Season 4 are the same folder. Everything else is unchanged.</summary>
+    public static string Canon(string? path)
+    {
+        var normal = Normalize(path);
+        if (normal.Length == 0)
+            return "";
+        var parts = normal.Split('/');
+        for (var i = 0; i < parts.Length; i++)
+            parts[i] = CanonSegment(parts[i]);
+        return string.Join('/', parts);
+    }
+
+    public static IReadOnlyList<string> SeasonSpellings(string? path)
+    {
+        var normal = Normalize(path);
+        if (normal.Length == 0)
+            return [];
+        var found = new List<string> { normal };
+        var parts = normal.Split('/');
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var match = SeasonFolder.Match(parts[i]);
+            if (!match.Success || !int.TryParse(match.Groups["n"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+                continue;
+            foreach (var spelling in new[] { "Season " + number.ToString(CultureInfo.InvariantCulture), "Season " + number.ToString("00", CultureInfo.InvariantCulture) })
+            {
+                if (spelling.Equals(parts[i], StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var copy = (string[])parts.Clone();
+                copy[i] = spelling;
+                var built = string.Join('/', copy);
+                if (!found.Contains(built, StringComparer.OrdinalIgnoreCase))
+                    found.Add(built);
+            }
+        }
+
+        return found;
+    }
+
     public static bool Matches(string? left, string? right)
     {
-        var a = Normalize(left);
-        var b = Normalize(right);
+        var a = Canon(left);
+        var b = Canon(right);
         if (a.Length == 0 || b.Length == 0)
             return false;
         if (a.Equals(b, StringComparison.OrdinalIgnoreCase))
@@ -87,7 +131,15 @@ public static class FolderKey
     }
 
     public static string DiskKey(string library, string relative)
-        => MediaLibrary.Tag(library) + "|" + Normalize(relative);
+        => MediaLibrary.Tag(library) + "|" + Canon(relative);
+
+    private static string CanonSegment(string part)
+    {
+        var match = SeasonFolder.Match(part);
+        if (!match.Success || !int.TryParse(match.Groups["n"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+            return part;
+        return "Season " + number.ToString(CultureInfo.InvariantCulture);
+    }
 
     public static bool IsSafe(string? relative)
     {
@@ -103,5 +155,41 @@ public static class FolderKey
         }
 
         return true;
+    }
+}
+
+/// <summary>Turns an *arr library file into the folder under the library root, keeping the real season directory name.</summary>
+public static class LibraryPath
+{
+    public static string FolderFromFile(string? itemPath, string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return "";
+        var file = filePath.Replace('\\', '/').Trim();
+        var leaf = Path.GetFileName(file.TrimEnd('/'));
+        var dir = PlexPath.IsMediaFile(leaf) ? Parent(file) : file.TrimEnd('/');
+        if (dir.Length == 0)
+            return "";
+        if (string.IsNullOrWhiteSpace(itemPath))
+            return "";
+        var item = itemPath.Replace('\\', '/').Trim().TrimEnd('/');
+        var root = Parent(item);
+        if (root.Length > 0 && dir.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
+            return FolderKey.Normalize(dir[(root.Length + 1)..]);
+        if (dir.Equals(item, StringComparison.OrdinalIgnoreCase) || dir.StartsWith(item + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            var show = Path.GetFileName(item);
+            var under = dir.Length > item.Length ? dir[(item.Length + 1)..] : "";
+            return FolderKey.Normalize(under.Length == 0 ? show : show + "/" + under);
+        }
+
+        return "";
+    }
+
+    private static string Parent(string path)
+    {
+        var text = path.Replace('\\', '/').TrimEnd('/');
+        var slash = text.LastIndexOf('/');
+        return slash <= 0 ? "" : text[..slash];
     }
 }

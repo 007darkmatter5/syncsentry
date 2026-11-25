@@ -337,7 +337,7 @@ public static class ArrHistoryParser
         var data = record.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.Object
             ? dataElement
             : default;
-        var importedPath = data.ValueKind == JsonValueKind.Object ? First(data, "importedPath", "path", "droppedPath") : "";
+        var importedPath = data.ValueKind == JsonValueKind.Object ? First(data, "importedPath") : "";
         string identity;
         string title;
         string libraryTag;
@@ -360,15 +360,17 @@ public static class ArrHistoryParser
             if (title.Length == 0)
                 title = source;
             libraryTag = "Movies";
-            relative = FolderName(First(movie, "path"));
+            var moviePath = First(movie, "path");
+            var movieFile = First(Object(record, "movieFile"), "path");
+            var movieLibraryFile = movieFile.Length > 0 ? movieFile : kind == "import" ? importedPath : "";
+            relative = LibraryPath.FolderFromFile(moviePath, movieLibraryFile);
             if (relative.Length == 0)
-                relative = FolderName(Parent(importedPath));
-            relativeFile = FileTail(relative, importedPath);
+                relative = FolderName(moviePath);
+            if (relative.Length == 0)
+                relative = FolderName(Parent(movieLibraryFile));
+            relativeFile = FileTail(relative, movieLibraryFile);
             external = ExternalMovie(movie);
             hasFile = Bool(movie, "hasFile") || HasObject(record, "movieFile");
-            var movieFile = First(Object(record, "movieFile"), "path");
-            if (relative.Length == 0 && movieFile.Length > 0)
-                relative = FolderName(Parent(movieFile));
         }
         else if (app.Equals("Lidarr", StringComparison.OrdinalIgnoreCase))
         {
@@ -409,14 +411,24 @@ public static class ArrHistoryParser
                 ? seriesTitle + " · S" + shownSeason + "E" + shownEpisode.ToString("00", CultureInfo.InvariantCulture)
                 : source;
             libraryTag = "TV";
-            var showFolder = FolderName(First(series, "path"));
-            var seasonFolder = FolderName(Parent(importedPath));
-            if (showFolder.Length == 0)
-                showFolder = FolderName(Parent(Parent(importedPath)));
-            if (seasonFolder.Length == 0 && season is int seasonValue && kind == "import")
-                seasonFolder = "Season " + seasonValue.ToString(CultureInfo.InvariantCulture);
-            relative = kind == "import" ? Join(showFolder, seasonFolder) : "";
-            relativeFile = kind == "import" ? FileTail(relative, importedPath) : null;
+            var seriesPath = First(series, "path");
+            var showFolder = FolderName(seriesPath);
+            var episodeFilePath = First(Object(record, "episodeFile"), "path");
+            var libraryFile = episodeFilePath;
+            if (libraryFile.Length == 0 && kind == "import")
+                libraryFile = importedPath;
+            relative = LibraryPath.FolderFromFile(seriesPath, libraryFile);
+            relativeFile = relative.Length == 0 ? null : FileTail(relative, libraryFile);
+            if (relative.Length == 0 && kind == "import")
+            {
+                var seasonFolder = FolderName(Parent(importedPath));
+                if (showFolder.Length == 0)
+                    showFolder = FolderName(Parent(Parent(importedPath)));
+                if (seasonFolder.Length == 0 && season is int seasonValue)
+                    seasonFolder = "Season " + seasonValue.ToString(CultureInfo.InvariantCulture);
+                relative = Join(showFolder, seasonFolder);
+                relativeFile = FileTail(relative, importedPath);
+            }
             external = null;
             var tvdb = Int(series, "tvdbId");
             var imdb = First(series, "imdbId");
@@ -430,17 +442,7 @@ public static class ArrHistoryParser
 
             seasonNumber = season;
             episodeNumber = number;
-            hasFile = Bool(episode, "hasFile") || HasObject(record, "episodeFile");
-            var episodeFile = First(Object(record, "episodeFile"), "path");
-            if (relative.Length == 0 && episodeFile.Length > 0)
-            {
-                var fileFolder = FolderName(Parent(episodeFile));
-                var show = showFolder.Length > 0 ? showFolder : FolderName(Parent(Parent(episodeFile)));
-                relative = Join(show, fileFolder);
-                relativeFile = FileTail(relative, episodeFile);
-            }
-            else if (relative.Length == 0 && hasFile && showFolder.Length > 0 && seasonNumber is int hasSeason)
-                relative = showFolder + "/Season " + hasSeason.ToString(CultureInfo.InvariantCulture);
+            hasFile = Bool(episode, "hasFile") || episodeFilePath.Length > 0;
         }
 
         if (kind != "import" && !hasFile)

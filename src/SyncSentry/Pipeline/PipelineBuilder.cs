@@ -84,7 +84,7 @@ public static class PipelineBuilder
         var copied = CopyOf(folder, arr.ImportedUtc, OnDisk(arr, input));
         var scanAt = ScanOf(folder, arr.ImportedUtc);
         var relative = arr.RelativeFolder.Length > 0 ? arr.RelativeFolder : copied.Relative;
-        var plex = MatchPlex(arr.LibraryTag, relative, arr.ExternalId, arr.SeriesGuid, arr.AlsoGuid, arr.Season, arr.Episode, input.Plex);
+        var plex = MatchPlex(arr.LibraryTag, relative, arr.ExternalId, arr.SeriesGuid, arr.AlsoGuid, arr.Season, arr.Episode, arr.Title, input.Plex);
         var logsKnown = !input.WorkerLogMissing || !input.HourlyLogMissing;
         var stages = new List<StageMark>
         {
@@ -111,7 +111,7 @@ public static class PipelineBuilder
         var link = LinkFor(app, input.Sources);
         var copied = CopyOf(folder, null, OnDiskFolder(folder, input));
         var scanAt = folder.ScanUtc;
-        var plex = MatchPlex(folder.LibraryTag, folder.RelativeFolder, null, null, null, null, null, input.Plex);
+        var plex = MatchPlex(folder.LibraryTag, folder.RelativeFolder, null, null, null, null, null, folder.RelativeFolder, input.Plex);
         var looked = link.Configured && link.Problem is null;
         var stages = new List<StageMark>
         {
@@ -373,6 +373,7 @@ public static class PipelineBuilder
         string? alsoGuid,
         int? season,
         int? episode,
+        string? title,
         IReadOnlyList<PlexHit> hits)
     {
         if (season is int seasonNo && episode is int episodeNo)
@@ -381,14 +382,14 @@ public static class PipelineBuilder
                 hit.Kind == "episode"
                 && hit.Season == seasonNo
                 && hit.Episode == episodeNo
-                && ShowMatches(hit, seriesGuid, alsoGuid));
+                && (ShowGuidMatches(hit, seriesGuid, alsoGuid) || ShowTitleMatches(title, hit)));
             if (byNumber is not null)
                 return byNumber;
         }
 
         foreach (var id in new[] { externalId, seriesGuid, alsoGuid })
         {
-            if (string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(id) || season is not null)
                 continue;
             var byId = hits.FirstOrDefault(hit =>
                 hit.Kind is not ("episode" or "show")
@@ -397,22 +398,52 @@ public static class PipelineBuilder
                 return byId;
         }
 
-        if (relative.Length == 0)
+        if (relative.Length > 0)
+        {
+            var byPath = hits.FirstOrDefault(hit =>
+                hit.Kind != "show"
+                && MediaLibrary.Same(hit.LibraryFolder, libraryTag)
+                && FolderKey.Matches(relative, hit.RelativeFolder)
+                && (season is null || episode is null || hit.Season is null || (hit.Season == season && hit.Episode == episode)));
+            if (byPath is not null)
+                return byPath;
+        }
+
+        if (season is not null)
             return null;
-        return hits.FirstOrDefault(hit =>
-            hit.Kind != "show"
-            && MediaLibrary.Same(hit.LibraryFolder, libraryTag)
-            && FolderKey.Matches(relative, hit.RelativeFolder)
-            && (season is null || episode is null || hit.Season is null || (hit.Season == season && hit.Episode == episode)));
+        return hits.FirstOrDefault(hit => hit.Kind is not ("episode" or "show") && ShowTitleMatches(title, hit));
     }
 
-    private static bool ShowMatches(PlexHit hit, string? seriesGuid, string? alsoGuid)
+    private static bool ShowGuidMatches(PlexHit hit, string? seriesGuid, string? alsoGuid)
     {
         if (string.IsNullOrEmpty(seriesGuid) && string.IsNullOrEmpty(alsoGuid))
-            return true;
+            return false;
         return hit.ExternalIds.Any(id =>
             id.Equals(seriesGuid, StringComparison.OrdinalIgnoreCase)
             || id.Equals(alsoGuid, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ShowTitleMatches(string? title, PlexHit hit)
+    {
+        var (name, year) = SplitTitle(title);
+        if (name.Length == 0)
+            return false;
+        var other = hit.Kind == "episode" ? hit.ShowTitle ?? "" : SplitTitle(hit.Title).Name;
+        if (other.Length == 0 || !name.Equals(other, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var otherYear = hit.Year ?? SplitTitle(hit.Title).Year;
+        return year is null || otherYear is null || year == otherYear;
+    }
+
+    private static (string Name, int? Year) SplitTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return ("", null);
+        var text = title.Split('·', 2)[0].Trim();
+        var open = text.LastIndexOf(" (", StringComparison.Ordinal);
+        if (open > 0 && text.EndsWith(')') && int.TryParse(text[(open + 2)..^1], out var year) && year is >= 1900 and <= 2100)
+            return (text[..open].Trim(), year);
+        return (text, null);
     }
 
     private static SourceLink LinkFor(string app, PipelineSources sources) => app switch

@@ -143,20 +143,103 @@ public class PipelineAccuracyTests
     }
 
     [Fact]
-    public async Task Plex_lookups_are_cached_so_the_same_show_is_not_asked_again()
+    public async Task Plex_index_is_paged_and_then_cached()
     {
-        var handler = new ScriptedPlex();
-        var catalog = new PlexCatalogClient(new OneClient(handler));
-        var query = new PlexQuery("movie|tt0094332", "Movies", "The Witches of Eastwick (1987) (tt0094332)", ["imdb:tt0094332"], null, null);
-        var first = await catalog.FetchAsync("http://plex.local:32400", "token-value", [query], CancellationToken.None);
-        Assert.True(first.Ok);
-        Assert.Contains(first.Hits, hit => hit.ExternalIds.Contains("imdb:tt0094332"));
-        var calls = handler.Calls;
-        Assert.True(calls >= 2);
-        var second = await catalog.FetchAsync("http://plex.local:32400", "token-value", [query], CancellationToken.None);
-        Assert.True(second.Ok);
-        Assert.Equal(calls, handler.Calls);
-        Assert.DoesNotContain(handler.Paths, path => path.Contains("token-value", StringComparison.Ordinal));
+        var previous = PlexCatalogClient.PageSize;
+        PlexCatalogClient.PageSize = 1;
+        try
+        {
+            var handler = new ScriptedPlex();
+            var catalog = new PlexCatalogClient(new OneClient(handler));
+            var first = await catalog.FetchAsync("http://plex.local:32400", "token-value", CancellationToken.None);
+            Assert.True(first.Ok);
+            Assert.Contains(first.Hits, hit => hit.ExternalIds.Contains("imdb:tt0120689") && hit.RelativeFolder.Contains("The Green Mile", StringComparison.Ordinal));
+            Assert.Contains(first.Hits, hit => hit.Title.Contains("No Escape", StringComparison.Ordinal));
+            Assert.Contains(handler.Paths, path => path.Contains("X-Plex-Container-Start=0", StringComparison.Ordinal) && path.Contains("includeGuids=1", StringComparison.Ordinal));
+            Assert.Contains(handler.Paths, path => path.Contains("X-Plex-Container-Start=1", StringComparison.Ordinal));
+            Assert.DoesNotContain(handler.Paths, path => path.Contains("guid=", StringComparison.Ordinal));
+            var calls = handler.Calls;
+            var second = await catalog.FetchAsync("http://plex.local:32400", "token-value", CancellationToken.None);
+            Assert.Equal(calls, handler.Calls);
+            Assert.Equal(first.Hits.Count, second.Hits.Count);
+        }
+        finally
+        {
+            PlexCatalogClient.PageSize = previous;
+        }
+    }
+
+    [Fact]
+    public void Plex_xml_index_reads_guids_paths_and_episode_numbers()
+    {
+        var xml = """
+            <MediaContainer size="2" totalSize="2">
+              <Video ratingKey="10" type="movie" title="The Manhattan Project" year="1986" addedAt="1795608000">
+                <Guid id="imdb://tt0091472"/>
+                <Guid id="tmdb://12345"/>
+                <Media><Part file="M:\Movies\The Manhattan Project (1986)\movie.mkv"/></Media>
+              </Video>
+              <Video ratingKey="11" type="episode" title="The Chosen One" parentIndex="4" index="1" grandparentTitle="The Chosen" year="2019" addedAt="1795608000">
+                <Guid id="tvdb://999"/>
+                <Media><Part file="M:\TV Shows\The Chosen (2019) (tt5622316)\Season 04\episode.mkv"/></Media>
+              </Video>
+            </MediaContainer>
+            """;
+        var page = PlexDocument.Read(xml, "TV Shows");
+        Assert.Equal(2, page.Hits.Count);
+        var movie = page.Hits[0];
+        Assert.Contains("imdb:tt0091472", movie.ExternalIds);
+        Assert.Contains("tmdb:12345", movie.ExternalIds);
+        Assert.Equal(1986, movie.Year);
+        Assert.Equal("The Manhattan Project (1986)", movie.RelativeFolder);
+        var episode = page.Hits[1];
+        Assert.Equal(4, episode.Season);
+        Assert.Equal(1, episode.Episode);
+        Assert.Equal("The Chosen", episode.ShowTitle);
+        Assert.Equal("The Chosen (2019) (tt5622316)/Season 04", episode.RelativeFolder);
+        Assert.True(PlexDocument.MorePages(1, 1, 1, 2));
+        Assert.False(PlexDocument.MorePages(2, 1, 1, 2));
+    }
+
+    [Fact]
+    public void Season_folders_come_from_the_arr_file_and_match_zero_padding()
+    {
+        var series = "/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)";
+        var file = series + "/Season 04/The Chosen - S04E01.mkv";
+        Assert.Equal("The Chosen (2019) (tt5622316)/Season 04", LibraryPath.FolderFromFile(series, file));
+        Assert.True(FolderKey.Matches("The Chosen (2019) (tt5622316)/Season 4", "The Chosen (2019) (tt5622316)/Season 04"));
+        Assert.Equal(FolderKey.DiskKey("TV", "The Chosen (2019) (tt5622316)/Season 4"), FolderKey.DiskKey("TV", "The Chosen (2019) (tt5622316)/Season 04"));
+
+        var json = """
+            {"records":[
+              {"sourceTitle":"The.Chosen.S04E01","date":"2026-11-25T12:00:00Z","eventType":"downloadFolderImported","episodeId":70,
+               "episode":{"id":70,"seasonNumber":4,"episodeNumber":1,"hasFile":true},
+               "episodeFile":{"path":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)/Season 04/The Chosen - S04E01.mkv"},
+               "series":{"title":"The Chosen","year":2019,"tvdbId":362156,"imdbId":"tt5622316","path":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)"},
+               "data":{"droppedPath":"/downloads/The.Chosen.S04E01.mkv","importedPath":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)/Season 04/The Chosen - S04E01.mkv"}}
+            ]}
+            """;
+        var item = Assert.Single(ArrHistoryParser.Read("Sonarr", json));
+        Assert.Equal("The Chosen (2019) (tt5622316)/Season 04", item.RelativeFolder);
+        Assert.DoesNotContain("Season 4/", item.RelativeFolder + "/", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_zero_padded_season_folder_counts_as_copied()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ss-season-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "TV Shows", "The Chosen (2019) (tt5622316)", "Season 04"));
+        var checker = new FolderExists(new QuietMounts(), new SyncSentry.Host.StuckProcesses(), TimeProvider.System);
+        var key = FolderKey.DiskKey("TV", "The Chosen (2019) (tt5622316)/Season 4");
+        var present = await checker.PresentAsync(root, [(key, "TV Shows/The Chosen (2019) (tt5622316)/Season 4")], CancellationToken.None);
+        Assert.Contains(key, present);
+        try
+        {
+            Directory.Delete(root, true);
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private static PipelineItem Show(ArrItem item, DateTimeOffset? now = null)
@@ -171,6 +254,11 @@ public class PipelineAccuracyTests
         var sources = new PipelineSources(new SourceLink(true, null), new SourceLink(true, null), new SourceLink(true, null), new SourceLink(true, null));
         var shown = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, [], [item], hits, sources, new HashSet<string>(), true, true)).Items);
         return shown.Stages.Single(stage => stage.Name == "In Plex").State;
+    }
+
+    private sealed class QuietMounts : SyncSentry.Host.IMountTable
+    {
+        public IReadOnlyList<SyncSentry.Host.MountEntry> Read() => [];
     }
 
     private sealed class OneClient(HttpMessageHandler handler) : IHttpClientFactory
@@ -190,11 +278,15 @@ public class PipelineAccuracyTests
             Calls++;
             var path = request.RequestUri?.PathAndQuery ?? "";
             Paths.Add(path);
-            var body = path.Contains("/library/sections", StringComparison.Ordinal) && !path.Contains("/all", StringComparison.Ordinal) && !path.Contains("recentlyAdded", StringComparison.Ordinal)
-                ? """{"MediaContainer":{"Directory":[{"key":"1","type":"movie","title":"Movies"}]}}"""
-                : path.Contains("guid=", StringComparison.Ordinal)
-                    ? """{"MediaContainer":{"Metadata":[{"ratingKey":"10","type":"movie","title":"The Witches of Eastwick","year":1987,"addedAt":1795608000,"Guid":[{"id":"imdb://tt0094332"}],"Media":[{"Part":[{"file":"M:\\Movies\\The Witches of Eastwick (1987) (tt0094332)\\movie.mkv"}]}]}]}}"""
-                    : """{"MediaContainer":{"Metadata":[]}}""";
+            string body;
+            if (path.Contains("/library/sections", StringComparison.Ordinal) && !path.Contains("/all", StringComparison.Ordinal))
+                body = """{"MediaContainer":{"Directory":[{"key":"1","type":"movie","title":"Movies"}]}}""";
+            else if (path.Contains("X-Plex-Container-Start=0", StringComparison.Ordinal))
+                body = """{"MediaContainer":{"size":1,"totalSize":2,"Metadata":[{"ratingKey":"10","type":"movie","title":"The Green Mile","year":1999,"addedAt":1795608000,"Guid":[{"id":"imdb://tt0120689"},{"id":"tmdb://497"}],"Media":[{"Part":[{"file":"M:\\Movies\\The Green Mile (1999) (tt0120689)\\The Green Mile.mkv"}]}]}]}}""";
+            else if (path.Contains("X-Plex-Container-Start=1", StringComparison.Ordinal))
+                body = """{"MediaContainer":{"size":1,"totalSize":2,"Metadata":[{"ratingKey":"11","type":"movie","title":"No Escape","year":1994,"addedAt":1795608000,"Guid":[{"id":"imdb://tt0110678"}],"Media":[{"Part":[{"file":"M:\\Movies\\No Escape (1994) (tt0110678)\\No Escape.mkv"}]}]}]}}""";
+            else
+                body = """{"MediaContainer":{"size":0,"totalSize":0,"Metadata":[]}}""";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body)

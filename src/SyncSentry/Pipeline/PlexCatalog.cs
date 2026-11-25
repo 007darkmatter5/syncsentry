@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Xml.Linq;
 
 namespace SyncSentry.Pipeline;
 
@@ -13,7 +14,9 @@ public sealed record PlexHit(
     DateTimeOffset? AddedUtc,
     int? Season = null,
     int? Episode = null,
-    string? RatingKey = null);
+    string? RatingKey = null,
+    string? ShowTitle = null,
+    int? Year = null);
 
 public sealed record PlexQuery(
     string Key,
@@ -32,212 +35,89 @@ public sealed record PlexFetch(bool Attempted, bool Ok, string? Problem, IReadOn
 
 public interface IPlexCatalog
 {
-    Task<PlexFetch> FetchAsync(string url, string token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken);
+    Task<PlexFetch> FetchAsync(string url, string token, CancellationToken cancellationToken);
 }
 
 public sealed class PlexCatalogClient(IHttpClientFactory http) : IPlexCatalog
 {
-    private static readonly TimeSpan RecentTtl = TimeSpan.FromMinutes(3);
-    private static readonly TimeSpan SectionTtl = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan FoundTtl = TimeSpan.FromMinutes(30);
-    private static readonly TimeSpan MissTtl = TimeSpan.FromMinutes(8);
-    private const int LookupBudget = 24;
+    internal static int PageSize { get; set; } = 200;
+    private static readonly TimeSpan IndexTtl = TimeSpan.FromMinutes(4);
 
     private readonly object _gate = new();
-    private (string Url, DateTimeOffset Until, IReadOnlyList<PlexSection> Sections)? _sections;
-    private (string Url, DateTimeOffset Until, IReadOnlyList<PlexHit> Hits)? _recent;
-    private readonly Dictionary<string, (DateTimeOffset Until, IReadOnlyList<PlexHit> Hits)> _lookups = new(StringComparer.OrdinalIgnoreCase);
+    private (string Url, DateTimeOffset Until, IReadOnlyList<PlexHit> Hits)? _index;
 
-    public async Task<PlexFetch> FetchAsync(string url, string token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken)
+    public async Task<PlexFetch> FetchAsync(string url, string token, CancellationToken cancellationToken)
     {
         if (!Rules.RemoteUrl(url) || string.IsNullOrWhiteSpace(token))
             return PlexFetch.NotConfigured;
 
+        var now = DateTimeOffset.UtcNow;
+        lock (_gate)
+        {
+            if (_index is { } cached && cached.Url == url && cached.Until > now)
+                return new PlexFetch(true, true, null, cached.Hits);
+        }
+
         try
         {
             var client = http.CreateClient("plex");
-            var now = DateTimeOffset.UtcNow;
-            var sections = CachedSections(url, now);
-            if (sections is null)
-            {
-                var sectionsBody = await GetAsync(client, url, token, "/library/sections", cancellationToken);
-                if (sectionsBody is null)
-                    return PlexFetch.Failed("refused");
-                sections = PlexJson.Sections(sectionsBody);
-                lock (_gate)
-                    _sections = (url, now + SectionTtl, sections);
-            }
-
-            var cachedRecent = CachedRecent(url, now);
+            var sectionsBody = await GetAsync(client, url, token, "/library/sections", cancellationToken);
+            if (sectionsBody is null)
+                return CachedOrFailed("refused");
             var hits = new List<PlexHit>();
-            if (cachedRecent is not null)
-                hits.AddRange(cachedRecent);
-            else
+            foreach (var section in PlexJson.Sections(sectionsBody))
             {
-                foreach (var section in sections)
-                {
-                    if (section.Type is not ("movie" or "show" or "artist"))
-                        continue;
-                    var recent = await GetAsync(
-                        client,
-                        url,
-                        token,
-                        "/library/sections/" + Uri.EscapeDataString(section.Key) + "/recentlyAdded?includeGuids=1&X-Plex-Container-Start=0&X-Plex-Container-Size=100",
-                        cancellationToken);
-                    if (recent is null)
-                        return PlexFetch.Failed("refused");
-                    hits.AddRange(PlexJson.Hits(recent, section.Title));
-                }
-
-                lock (_gate)
-                    _recent = (url, now + RecentTtl, hits.ToList());
+                if (section.Type is not ("movie" or "show" or "artist"))
+                    continue;
+                hits.AddRange(await PageSectionAsync(client, url, token, section, cancellationToken));
             }
 
-            var budget = LookupBudget;
-            foreach (var query in queries)
-            {
-                if (PlexMatch.Covers(query, hits))
-                    continue;
-                var cacheKey = PlexMatch.CacheKey(url, query);
-                if (TryCachedLookup(cacheKey, now, out var cached))
-                {
-                    hits.AddRange(cached);
-                    continue;
-                }
-
-                if (budget <= 0)
-                    continue;
-                budget--;
-                IReadOnlyList<PlexHit> found;
-                try
-                {
-                    found = await LookupAsync(client, url, token, sections, query, cancellationToken);
-                }
-                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
-                {
-                    found = [];
-                }
-
-                lock (_gate)
-                    _lookups[cacheKey] = (now + (found.Count > 0 ? FoundTtl : MissTtl), found);
-                hits.AddRange(found);
-            }
-
-            return new PlexFetch(true, true, null, hits);
+            IReadOnlyList<PlexHit> indexed = hits;
+            lock (_gate)
+                _index = (url, now + IndexTtl, indexed);
+            return new PlexFetch(true, true, null, indexed);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            return PlexFetch.Failed("unreachable");
+            return CachedOrFailed("unreachable");
         }
     }
 
-    private async Task<IReadOnlyList<PlexHit>> LookupAsync(
-        HttpClient client,
-        string url,
-        string token,
-        IReadOnlyList<PlexSection> sections,
-        PlexQuery query,
-        CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PlexHit>> PageSectionAsync(HttpClient client, string url, string token, PlexSection section, CancellationToken cancellationToken)
     {
-        var section = SectionFor(sections, query.LibraryTag);
-        if (section is null)
-            return [];
-        var guid = query.Guids.FirstOrDefault();
-        if (guid is not null)
+        var hits = new List<PlexHit>();
+        var pageSize = Math.Clamp(PageSize, 1, 500);
+        var type = section.Type == "show" ? "&type=4" : section.Type == "artist" ? "&type=10" : "";
+        for (var start = 0; start < 50000; start += pageSize)
         {
-            var type = query.LibraryTag == "TV" ? "&type=2" : query.LibraryTag == "Music" ? "&type=9" : "";
             var body = await GetAsync(
                 client,
                 url,
                 token,
-                "/library/sections/" + Uri.EscapeDataString(section.Key) + "/all?includeGuids=1" + type + "&guid=" + Uri.EscapeDataString(PlexMatch.GuidValue(guid)),
+                "/library/sections/" + Uri.EscapeDataString(section.Key) + "/all?includeGuids=1" + type
+                    + "&X-Plex-Container-Start=" + start.ToString(CultureInfo.InvariantCulture)
+                    + "&X-Plex-Container-Size=" + pageSize.ToString(CultureInfo.InvariantCulture),
                 cancellationToken);
             if (body is null)
-                return [];
-            var found = PlexJson.Hits(body, section.Title);
-            if (query.LibraryTag != "TV")
-                return found;
-            var show = found.FirstOrDefault(hit => hit.Kind == "show" && !string.IsNullOrEmpty(hit.RatingKey));
-            if (show is null)
-                return found;
-            var leaves = await GetAsync(
-                client,
-                url,
-                token,
-                "/library/metadata/" + Uri.EscapeDataString(show.RatingKey!) + "/allLeaves?includeGuids=1",
-                cancellationToken);
-            if (leaves is null)
-                return found;
-            var episodes = PlexJson.Hits(leaves, section.Title)
-                .Select(hit => hit with { ExternalIds = hit.ExternalIds.Concat(query.Guids).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() })
-                .ToList();
-            return episodes.Count > 0 ? episodes : found;
+                break;
+            var page = PlexDocument.Read(body, section.Title);
+            hits.AddRange(page.Hits);
+            if (!PlexDocument.MorePages(hits.Count, page.Hits.Count, pageSize, page.Total))
+                break;
         }
 
-        var title = query.RelativeFolder.Split('/', 2)[0];
-        if (title.Length == 0)
-            return [];
-        var leaf = query.LibraryTag == "TV" ? "4" : query.LibraryTag == "Music" ? "10" : "1";
-        var searched = await GetAsync(
-            client,
-            url,
-            token,
-            "/library/sections/" + Uri.EscapeDataString(section.Key) + "/all?includeGuids=1&type=" + leaf + "&title=" + Uri.EscapeDataString(title) + "&X-Plex-Container-Size=8",
-            cancellationToken);
-        return searched is null ? [] : PlexJson.Hits(searched, section.Title);
+        return hits;
     }
 
-    private IReadOnlyList<PlexSection>? CachedSections(string url, DateTimeOffset now)
+    private PlexFetch CachedOrFailed(string problem)
     {
         lock (_gate)
         {
-            if (_sections is { } cached && cached.Url == url && cached.Until > now)
-                return cached.Sections;
+            if (_index is { } cached)
+                return new PlexFetch(true, true, null, cached.Hits);
         }
 
-        return null;
-    }
-
-    private IReadOnlyList<PlexHit>? CachedRecent(string url, DateTimeOffset now)
-    {
-        lock (_gate)
-        {
-            if (_recent is { } cached && cached.Url == url && cached.Until > now)
-                return cached.Hits;
-        }
-
-        return null;
-    }
-
-    private bool TryCachedLookup(string key, DateTimeOffset now, out IReadOnlyList<PlexHit> hits)
-    {
-        lock (_gate)
-        {
-            if (_lookups.TryGetValue(key, out var cached) && cached.Until > now)
-            {
-                hits = cached.Hits;
-                return true;
-            }
-        }
-
-        hits = [];
-        return false;
-    }
-
-    private static PlexSection? SectionFor(IReadOnlyList<PlexSection> sections, string libraryTag)
-    {
-        var type = libraryTag switch
-        {
-            "Movies" => "movie",
-            "TV" => "show",
-            "Music" => "artist",
-            _ => ""
-        };
-        if (type.Length == 0)
-            return null;
-        var folder = MediaLibrary.Folder(libraryTag);
-        return sections.FirstOrDefault(section => section.Type.Equals(type, StringComparison.OrdinalIgnoreCase) && section.Title.Equals(folder, StringComparison.OrdinalIgnoreCase))
-            ?? sections.FirstOrDefault(section => section.Type.Equals(type, StringComparison.OrdinalIgnoreCase));
+        return PlexFetch.Failed(problem);
     }
 
     private static async Task<string?> GetAsync(HttpClient client, string url, string token, string path, CancellationToken cancellationToken)
@@ -278,24 +158,9 @@ public static class PlexJson
     }
 
     public static IReadOnlyList<PlexHit> Hits(string json, string sectionTitle)
-    {
-        using var document = JsonDocument.Parse(json);
-        if (!Container(document.RootElement, out var container))
-            return [];
-        if (!Prop(container, "Metadata", out var metadata) || metadata.ValueKind != JsonValueKind.Array)
-            return [];
-        var hits = new List<PlexHit>();
-        foreach (var item in metadata.EnumerateArray())
-        {
-            var hit = ReadHit(item, sectionTitle);
-            if (hit is not null)
-                hits.Add(hit);
-        }
+        => PlexDocument.Read(json, sectionTitle).Hits;
 
-        return hits;
-    }
-
-    private static PlexHit? ReadHit(JsonElement item, string sectionTitle)
+    internal static PlexHit? ReadHit(JsonElement item, string sectionTitle)
     {
         var type = String(item, "type");
         if (type is not ("movie" or "episode" or "album" or "track" or "show"))
@@ -313,7 +178,9 @@ public static class PlexJson
         var season = type == "episode" ? Int(item, "parentIndex") : null;
         var episode = type == "episode" ? Int(item, "index") : null;
         var rating = String(item, "ratingKey");
-        return new PlexHit(title, type, split.LibraryFolder, split.RelativeFolder, ids, added, season, episode, rating.Length == 0 ? null : rating);
+        var showTitle = type == "episode" ? String(item, "grandparentTitle") : null;
+        var year = Int(item, "year") ?? (type == "episode" ? Int(item, "grandparentYear") : null);
+        return new PlexHit(title, type, split.LibraryFolder, split.RelativeFolder, ids, added, season, episode, rating.Length == 0 ? null : rating, showTitle, year);
     }
 
     private static string TitleOf(JsonElement item, string type)
@@ -358,7 +225,7 @@ public static class PlexJson
         return ids;
     }
 
-    private static void AddGuid(List<string> ids, string guid)
+    internal static void AddGuid(List<string> ids, string guid)
     {
         var colon = guid.IndexOf("://", StringComparison.Ordinal);
         if (colon <= 0 || colon + 3 >= guid.Length)
@@ -434,6 +301,144 @@ public static class PlexJson
 }
 
 public sealed record PlexSection(string Key, string Title, string Type);
+
+public readonly record struct PlexPage(IReadOnlyList<PlexHit> Hits, int? Total);
+
+public static class PlexDocument
+{
+    public static PlexPage Read(string body, string sectionTitle)
+    {
+        var text = body.Trim();
+        if (text.StartsWith('<'))
+            return ReadXml(text, sectionTitle);
+        using var document = JsonDocument.Parse(text);
+        if (!Container(document.RootElement, out var container))
+            return new PlexPage([], null);
+        var hits = new List<PlexHit>();
+        if (Prop(container, "Metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in metadata.EnumerateArray())
+            {
+                var hit = ReadHit(item, sectionTitle);
+                if (hit is not null)
+                    hits.Add(hit);
+            }
+        }
+
+        int? total = Int(container, "totalSize") ?? Int(container, "size");
+        return new PlexPage(hits, total);
+    }
+
+    public static bool MorePages(int fetched, int pageCount, int pageSize, int? total)
+    {
+        if (pageCount < pageSize)
+            return false;
+        if (total is int count && fetched >= count)
+            return false;
+        return pageCount > 0;
+    }
+
+    private static PlexPage ReadXml(string xml, string sectionTitle)
+    {
+        var document = XDocument.Parse(xml);
+        var root = document.Root;
+        if (root is null)
+            return new PlexPage([], null);
+        var hits = new List<PlexHit>();
+        foreach (var item in root.Elements())
+        {
+            if (item.Name.LocalName is not ("Video" or "Directory" or "Track"))
+                continue;
+            var type = Attr(item, "type");
+            if (type is not ("movie" or "episode" or "album" or "track" or "show"))
+                continue;
+            var file = item.Elements("Media").Elements("Part").Select(part => Attr(part, "file")).FirstOrDefault(value => value.Length > 0) ?? "";
+            var split = PlexPath.Split(file, sectionTitle);
+            var title = Attr(item, "title");
+            var show = Attr(item, "grandparentTitle");
+            var year = IntAttr(item, "year") ?? IntAttr(item, "grandparentYear");
+            if (type == "episode" && show.Length > 0)
+            {
+                var season = IntAttr(item, "parentIndex");
+                var episode = IntAttr(item, "index");
+                if (season is not null && episode is not null)
+                    title = show + " · S" + season.Value.ToString(CultureInfo.InvariantCulture) + "E" + episode.Value.ToString("00", CultureInfo.InvariantCulture);
+            }
+            else if (year is >= 1900 && title.Length > 0 && !title.Contains("(" + year.Value.ToString(CultureInfo.InvariantCulture) + ")", StringComparison.Ordinal))
+                title += " (" + year.Value.ToString(CultureInfo.InvariantCulture) + ")";
+            var ids = item.Elements("Guid").Select(guid => Attr(guid, "id")).Where(id => id.Length > 0).ToList();
+            var own = Attr(item, "guid");
+            if (own.Length > 0)
+                ids.Insert(0, own);
+            var parsed = new List<string>();
+            foreach (var id in ids)
+                PlexJson.AddGuid(parsed, id);
+            long addedUnix = 0;
+            var addedText = Attr(item, "addedAt");
+            DateTimeOffset? added = long.TryParse(addedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out addedUnix) && addedUnix > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(addedUnix)
+                : null;
+            hits.Add(new PlexHit(
+                title,
+                type,
+                split.LibraryFolder,
+                split.RelativeFolder,
+                parsed,
+                added,
+                type == "episode" ? IntAttr(item, "parentIndex") : null,
+                type == "episode" ? IntAttr(item, "index") : null,
+                Attr(item, "ratingKey") is { Length: > 0 } rating ? rating : null,
+                type == "episode" ? show : null,
+                year));
+        }
+
+        var total = IntAttr(root, "totalSize") ?? IntAttr(root, "size");
+        return new PlexPage(hits, total);
+    }
+
+    private static string Attr(XElement element, string name)
+        => element.Attribute(name)?.Value.Trim() ?? "";
+
+    private static int? IntAttr(XElement element, string name)
+        => int.TryParse(Attr(element, name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) ? number : null;
+
+    private static bool Container(JsonElement root, out JsonElement container)
+    {
+        if (root.ValueKind == JsonValueKind.Object && Prop(root, "MediaContainer", out container))
+            return true;
+        container = root;
+        return root.ValueKind == JsonValueKind.Object;
+    }
+
+    private static bool Prop(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out value))
+            return true;
+        if (name.Length > 0)
+        {
+            var camel = char.ToLowerInvariant(name[0]) + name[1..];
+            if (!camel.Equals(name, StringComparison.Ordinal) && element.ValueKind == JsonValueKind.Object && element.TryGetProperty(camel, out value))
+                return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static int? Int(JsonElement element, string name)
+    {
+        if (!Prop(element, name, out var value))
+            return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+            return number;
+        if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        return null;
+    }
+
+    private static PlexHit? ReadHit(JsonElement item, string sectionTitle)
+        => PlexJson.ReadHit(item, sectionTitle);
+}
 
 public static class PlexMatch
 {
