@@ -12,14 +12,19 @@ public interface IFolderExists
     Task<IReadOnlySet<string>> PresentAsync(string root, IReadOnlyList<(string Key, string Relative)> paths, CancellationToken cancellationToken);
 }
 
-public sealed class FolderExists(IMountTable mounts, StuckProcesses stuck) : IFolderExists
+public sealed class FolderExists(IMountTable mounts, StuckProcesses stuck, TimeProvider clock) : IFolderExists
 {
+    private readonly Dictionary<string, (bool Present, DateTimeOffset Until)> _cache = new(StringComparer.Ordinal);
+    private readonly List<string> _hung = [];
+
     public async Task<IReadOnlySet<string>> PresentAsync(string root, IReadOnlyList<(string Key, string Relative)> paths, CancellationToken cancellationToken)
     {
         var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!Rules.AbsolutePath(root) || paths.Count == 0)
             return found;
 
+        var now = clock.GetUtcNow();
+        ReapHung();
         var fullRoot = Path.GetFullPath(root);
         var local = new List<(string Key, string Full)>();
         var isolated = new List<(string Key, string Full)>();
@@ -31,6 +36,15 @@ public sealed class FolderExists(IMountTable mounts, StuckProcesses stuck) : IFo
             var full = Combine(fullRoot, relative);
             if (full is null)
                 continue;
+            if (TryCache(full, now, out var present))
+            {
+                if (present)
+                    found.Add(key);
+                continue;
+            }
+
+            if (IsHung(full))
+                continue;
             var covering = MountInfo.FindCovering(table, full);
             if (MountRisk.PathNeedsIsolation(full, covering))
                 isolated.Add((key, full));
@@ -40,41 +54,78 @@ public sealed class FolderExists(IMountTable mounts, StuckProcesses stuck) : IFo
 
         foreach (var (key, full) in local)
         {
+            var present = false;
             try
             {
-                if (File.Exists(full) || Directory.Exists(full))
-                    found.Add(key);
+                present = File.Exists(full) || Directory.Exists(full);
             }
             catch (IOException)
             {
             }
+
+            Remember(full, present, now);
+            if (present)
+                found.Add(key);
         }
 
-        if (isolated.Count == 0)
+        if (isolated.Count == 0 || _hung.Count >= 2)
             return found;
 
-        var stuckKey = "exists:" + MountInfo.Normalize(fullRoot);
-        if (stuck.IsStuck(stuckKey))
-            return found;
-
-        var batch = isolated.Take(40).ToList();
+        var batch = isolated.Take(250).ToList();
         var start = AppSpawn.Create(["--io-exists", .. batch.Select(item => item.Full)]);
-        var result = await ProcessRunner.RunAsync(start, TimeSpan.FromSeconds(4), cancellationToken);
-        if (result.TimedOut || !result.Exited)
-        {
-            if (result.LiveProcess is not null)
-                stuck.Remember(stuckKey, result.LiveProcess);
-            return found;
-        }
-
+        var result = await ProcessRunner.RunAsync(start, TimeSpan.FromSeconds(12), cancellationToken);
         var answers = result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         for (var i = 0; i < batch.Count && i < answers.Length; i++)
         {
-            if (answers[i].Equals("yes", StringComparison.OrdinalIgnoreCase))
+            var present = answers[i].Equals("yes", StringComparison.OrdinalIgnoreCase);
+            Remember(batch[i].Full, present, now);
+            if (present)
                 found.Add(batch[i].Key);
         }
 
+        if ((result.TimedOut || !result.Exited) && answers.Length < batch.Count && result.LiveProcess is not null)
+        {
+            var hung = batch[answers.Length].Full;
+            stuck.Remember("exists:" + hung, result.LiveProcess);
+            lock (_cache)
+                _hung.Add(hung);
+        }
+
         return found;
+    }
+
+    private bool TryCache(string full, DateTimeOffset now, out bool present)
+    {
+        lock (_cache)
+        {
+            if (_cache.TryGetValue(full, out var cached) && cached.Until > now)
+            {
+                present = cached.Present;
+                return true;
+            }
+        }
+
+        present = false;
+        return false;
+    }
+
+    private void Remember(string full, bool present, DateTimeOffset now)
+    {
+        var until = now + (present ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(2));
+        lock (_cache)
+            _cache[full] = (present, until);
+    }
+
+    private bool IsHung(string full)
+    {
+        lock (_cache)
+            return _hung.Contains(full);
+    }
+
+    private void ReapHung()
+    {
+        lock (_cache)
+            _hung.RemoveAll(path => !stuck.IsStuck("exists:" + path));
     }
 
     internal static string? Combine(string fullRoot, string relative)
@@ -311,10 +362,12 @@ public sealed class PipelineRefresher(
 
         foreach (var item in items)
         {
+            // The initial copy put whole folders on the UNAS before these push logs existed.
+            // The folder being there is enough; a missing log line does not mean it is stuck.
+            if (item.RelativeFolder.Length > 0)
+                Add(item.LibraryTag, item.RelativeFolder);
             if (!string.IsNullOrEmpty(item.RelativeFile))
                 Add(item.LibraryTag, item.RelativeFile);
-            else if (item.RelativeFolder.Length > 0)
-                Add(item.LibraryTag, item.RelativeFolder);
         }
 
         foreach (var line in lines)
