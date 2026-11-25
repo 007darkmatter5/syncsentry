@@ -90,6 +90,56 @@ public class PipelineAccuracyTests
     }
 
     [Fact]
+    public void A_file_already_in_plex_stays_in_plex_when_a_later_upgrade_fails()
+    {
+        var movie = new ArrItem(
+            "Radarr", "movie", "movie:42", "Batman Begins (2005)", "Movies", "Movies",
+            "Batman Begins (2005)", null, "imdb:tt0372784", Now.AddHours(-5), null, true, "upgrade rejected",
+            HasFile: true);
+        var hit = new PlexHit("Batman Begins", "movie", "Movies", "Batman Begins (2005)", ["imdb:tt0372784"], Now.AddHours(-1), Year: 2005);
+        var sources = new PipelineSources(new SourceLink(false, null), new SourceLink(true, null), new SourceLink(false, null), new SourceLink(true, null));
+        var shown = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, [], [movie], [hit], sources, new HashSet<string>(), false, false)).Items);
+        Assert.Equal("in-plex", shown.Badge);
+        Assert.Equal("Upgrade download failed.", shown.Problem);
+        Assert.Equal("done", shown.Stages.Single(stage => stage.Name == "Downloaded").State);
+
+        var alreadyImported = movie with { ImportedUtc = Now.AddMinutes(-20) };
+        var kept = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, [], [alreadyImported], [hit], sources, new HashSet<string>(), false, false)).Items);
+        Assert.Equal("in-plex", kept.Badge);
+        Assert.Equal("Upgrade download failed.", kept.Problem);
+
+        var missed = movie with { Identity = "movie:99", Title = "Not In Library (2026)", RelativeFolder = "Not In Library (2026)", ExternalId = "imdb:tt0000001" };
+        var failed = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, [], [missed], [hit], sources, new HashSet<string>(), false, false)).Items);
+        Assert.Equal("failed", failed.Badge);
+    }
+
+    [Fact]
+    public void Sonarr_episode_files_supply_the_season_folder_when_history_has_no_path()
+    {
+        var json = """
+            {"records":[
+              {"sourceTitle":"The.Chosen.S04E01","date":"2026-11-25T12:00:00Z","eventType":"grabbed","seriesId":12,"episodeId":70,
+               "episode":{"id":70,"seasonNumber":4,"episodeNumber":1,"hasFile":true},
+               "series":{"id":12,"title":"The Chosen","year":2019,"path":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)"}}
+            ]}
+            """;
+        var grabbed = Assert.Single(ArrHistoryParser.Read("Sonarr", json));
+        Assert.Equal("", grabbed.RelativeFolder);
+        Assert.Equal(12, grabbed.SeriesId);
+        var files = """
+            [{"seriesId":12,"seasonNumber":4,"path":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)/Season 04/The Chosen - S04E01.mkv","episodeIds":[70,71]}]
+            """;
+        var fromFile = Assert.Single(ArrHistoryParser.ApplyLibraryPaths(ArrHistoryParser.Read("Sonarr", json), 12, files, null));
+        Assert.Equal("The Chosen (2019) (tt5622316)/Season 04", fromFile.RelativeFolder);
+
+        var seriesOnly = """
+            {"path":"/mnt/user/data/media/TV Shows/The Chosen (2019) (tt5622316)","seasons":[{"seasonNumber":4,"seasonFolder":"Season 04"}]}
+            """;
+        var fromSeries = Assert.Single(ArrHistoryParser.ApplyLibraryPaths(ArrHistoryParser.Read("Sonarr", json), 12, "[]", seriesOnly));
+        Assert.Equal("The Chosen (2019) (tt5622316)/Season 04", fromSeries.RelativeFolder);
+    }
+
+    [Fact]
     public void Queue_records_mark_the_matching_download()
     {
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

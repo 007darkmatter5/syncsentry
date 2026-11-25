@@ -186,6 +186,23 @@ public static class LibraryPath
         return "";
     }
 
+    /// <summary>Last show/season or movie folder in a library file path, when the series root is not known.</summary>
+    public static string TailFolder(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return "";
+        var file = filePath.Replace('\\', '/').Trim();
+        var leaf = Path.GetFileName(file.TrimEnd('/'));
+        var dir = PlexPath.IsMediaFile(leaf) ? Parent(file) : file.TrimEnd('/');
+        if (dir.Length == 0)
+            return "";
+        var season = Path.GetFileName(dir);
+        var show = Path.GetFileName(Parent(dir));
+        if (show.Length > 0 && season.StartsWith("Season ", StringComparison.OrdinalIgnoreCase))
+            return FolderKey.Normalize(show + "/" + season);
+        return FolderKey.Normalize(season);
+    }
+
     private static string Parent(string path)
     {
         var text = path.Replace('\\', '/').TrimEnd('/');

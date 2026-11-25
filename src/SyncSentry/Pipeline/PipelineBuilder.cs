@@ -94,6 +94,14 @@ public static class PipelineBuilder
             ScanStage(scanAt, logsKnown),
             PlexStage(plex, input)
         };
+        string? upgrade = null;
+        if (stages[^1].State == "done" && arr.DownloadFailed)
+        {
+            if (stages[0].State == "failed")
+                stages[0] = new StageMark("Downloaded", "done", stages[0].At, null);
+            upgrade = "Upgrade download failed.";
+        }
+
         return Finish(
             arr.App + "|" + arr.Identity,
             arr.Title,
@@ -102,7 +110,8 @@ public static class PipelineBuilder
             arr.App,
             copied.Bytes,
             stages,
-            input.Now);
+            input.Now,
+            upgrade);
     }
 
     private static PipelineItem FromFolder(PushFolder folder, PipelineInput input)
@@ -129,7 +138,8 @@ public static class PipelineBuilder
             "push log",
             copied.Bytes,
             stages,
-            input.Now);
+            input.Now,
+            null);
     }
 
     private static StageMark DownloadStage(ArrItem arr)
@@ -196,10 +206,11 @@ public static class PipelineBuilder
         string source,
         long? bytes,
         IReadOnlyList<StageMark> stages,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? note)
     {
         var badge = BadgeFor(stages);
-        var problem = ProblemFor(stages, now);
+        var problem = note ?? ProblemFor(stages, now);
         var times = stages.Where(stage => stage.At is not null).Select(stage => stage.At!.Value).ToList();
         var plexAt = stages[^1].State == "done" ? stages[^1].At : null;
         string? elapsed = null;
