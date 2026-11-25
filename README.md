@@ -121,7 +121,7 @@ The Pipeline page follows a new movie, episode, or album until Plex has it. Five
 2. **Imported.** The import event from that app, on UnraidHive.
 3. **Copied.** The bash push scripts copied the movie folder or the season folder to the UNAS. SyncSentry does not copy anything. It reads `/logs/mediamanny/unas-push-worker.log` (the run that starts when something is imported) and `/logs/mediamanny/unas-push-hourly.log` (the catch-up). A line such as `OK copied: [Movies] Title (123 bytes)` or `OK [TV] Show/Season 1` counts. The page can also confirm the folder under `/mnt/remotes/UNASPRO_Media`.
 4. **Scan asked.** A `PLEX scan asked` line in the same log. Plex paths look like `M:\TV Shows\...` and map onto the UNAS share.
-5. **In Plex.** The file is in the Plex library. SyncSentry checks the recently added list, then looks the item up by its path (`M:\<Library>\...`, the same path the scan log uses) and by its IMDb or TVDB id. Lookups are cached so Plex is not asked again for every refresh.
+5. **In Plex.** The file is in the Plex library. SyncSentry keeps an index of each movie, episode, and track: the external ids on the item, the `M:\<Library>\...` file path, and the title and year. The index is refreshed every few minutes, not once per item. An episode matches when its path matches, or when the show and the season and episode number match.
 
 Log times are America/Chicago. The list defaults to the last 7 days and refreshes on its own.
 
