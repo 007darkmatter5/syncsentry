@@ -1,0 +1,170 @@
+@page "/pipeline"
+@inject PipelineBoard Board
+@implements IDisposable
+
+<PageTitle>Pipeline · SyncSentry</PageTitle>
+
+@{
+    var snapshot = Board.Current;
+    var items = snapshot.Items;
+}
+
+<div class="pipe-head">
+    <div>
+        <div class="kicker">Pipeline</div>
+        <MudText Typo="Typo.h4" Class="mb-0">On the way to Plex</MudText>
+    </div>
+    <MudSelect T="int" Value="snapshot.WindowDays" ValueChanged="ChangeWindow" Label="Show" Variant="Variant.Outlined" Margin="Margin.Dense">
+        <MudSelectItem T="int" Value="1">Last 1 day</MudSelectItem>
+        <MudSelectItem T="int" Value="3">Last 3 days</MudSelectItem>
+        <MudSelectItem T="int" Value="7">Last 7 days</MudSelectItem>
+        <MudSelectItem T="int" Value="14">Last 14 days</MudSelectItem>
+        <MudSelectItem T="int" Value="30">Last 30 days</MudSelectItem>
+    </MudSelect>
+</div>
+<MudText Typo="Typo.body2" Class="mb-2 muted">Each new movie, episode, or album, and how far it has gotten toward Plex. This page refreshes on its own. SyncSentry only reads the push logs and the apps you connect. It does not copy files.</MudText>
+<MudText Typo="Typo.caption" Class="d-block mb-3 muted">@Updated(snapshot)</MudText>
+
+@foreach (var hint in snapshot.Hints)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+        @hint.Text
+        @if (hint.Settings)
+        {
+            <MudLink Href="settings" Class="ml-2">Open settings</MudLink>
+        }
+    </MudAlert>
+}
+
+<MudGrid Class="mb-4">
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">In Plex</div>
+            <div class="stat-value">@Count(items, "in-plex")</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">On the way</div>
+            <div class="stat-value">@items.Count(item => item.Badge is "downloaded" or "imported" or "copied" or "scan" or "pending")</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Stuck</div>
+            <div class="stat-value">@Count(items, "stuck")</div>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudPaper Class="pa-3" Elevation="0" Outlined="true">
+            <div class="kicker">Failed</div>
+            <div class="stat-value">@Count(items, "failed")</div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@if (snapshot.Waiting)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">Reading the push logs.</MudAlert>
+}
+else if (items.Count == 0)
+{
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText>Nothing new in the last @snapshot.WindowDays days.</MudText>
+        <MudText Typo="Typo.body2" Class="muted">Copied folders and Plex scan requests show up from the push logs even before any API keys are saved.</MudText>
+    </MudPaper>
+}
+else
+{
+    @foreach (var item in items)
+    {
+        <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true">
+            <div class="panel-title">
+                <div style="min-width: 0">
+                    <div class="change-title">@item.Title</div>
+                    <div class="change-file">@item.Subtitle</div>
+                </div>
+                <span class="status-badge @BadgeClass(item.Badge)">@item.BadgeText</span>
+            </div>
+            <div class="pipe" aria-label="@($"Stages for {item.Title}")">
+                @foreach (var stage in item.Stages)
+                {
+                    <div class="pipe-step pipe-@stage.State">
+                        <div class="pipe-dot"></div>
+                        <div class="pipe-name">@stage.Name</div>
+                        <div class="pipe-time">@When(stage)</div>
+                    </div>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(item.Problem))
+            {
+                <MudText Typo="Typo.body2" Class="mt-3">@item.Problem</MudText>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private PeriodicTimer? _timer;
+
+    protected override void OnInitialized()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void ChangeWindow(int days) => Board.SetWindow(days);
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static int Count(IReadOnlyList<PipelineItem> items, string badge)
+        => items.Count(item => item.Badge == badge);
+
+    private static string BadgeClass(string badge) => badge switch
+    {
+        "in-plex" => "badge-ok",
+        "failed" => "badge-error",
+        "stuck" => "badge-wait",
+        "downloaded" or "imported" or "copied" or "scan" => "badge-copy",
+        _ => "badge-unknown"
+    };
+
+    private static string When(StageMark stage)
+    {
+        if (stage.State == "failed")
+            return "Failed";
+        if (stage.State == "stuck")
+            return "Stuck";
+        if (stage.State == "unknown")
+            return "Unknown";
+        if (stage.At is not null)
+            return stage.At.Value.ToLocalTime().ToString("g");
+        if (!string.IsNullOrWhiteSpace(stage.Note))
+            return stage.Note;
+        return "—";
+    }
+
+    private static string Updated(PipelineSnapshot snapshot)
+    {
+        if (snapshot.GeneratedUtc == DateTimeOffset.MinValue)
+            return "Waiting for the first read.";
+        var ago = DateTimeOffset.Now - snapshot.GeneratedUtc;
+        if (ago < TimeSpan.FromSeconds(10))
+            return "Updated just now.";
+        if (ago < TimeSpan.FromMinutes(1))
+            return "Updated " + (int)ago.TotalSeconds + "s ago.";
+        return "Updated " + snapshot.GeneratedUtc.ToLocalTime().ToString("t") + ".";
+    }
+}

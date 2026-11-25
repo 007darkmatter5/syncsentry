@@ -29,6 +29,14 @@ public sealed class InstanceSetting
     public int ScheduleStartHour { get; set; } = 7;
     public int ScheduleEndHour { get; set; } = 23;
     public double ScheduleMegabytes { get; set; } = 1;
+    public string SonarrUrl { get; set; } = "";
+    public string SonarrApiKeyProtected { get; set; } = "";
+    public string RadarrUrl { get; set; } = "";
+    public string RadarrApiKeyProtected { get; set; } = "";
+    public string LidarrUrl { get; set; } = "";
+    public string LidarrApiKeyProtected { get; set; } = "";
+    public string PlexUrl { get; set; } = "http://192.168.1.16:32400";
+    public string PlexTokenProtected { get; set; } = "";
     public DateTimeOffset UpdatedUtc { get; set; }
 }
 

@@ -103,6 +103,39 @@
             </MudTable>
         }
     </MudTabPanel>
+    <MudTabPanel Text="Pipeline">
+        @if (_pipeline is not null)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3 muted">Sonarr, Radarr, and Lidarr show when something is grabbed and when it is imported. Plex shows when it is in the library. Keys are stored encrypted and are not shown again. Leave a key blank to keep the one already saved. The Pipeline page still reads the push logs when these are empty.</MudText>
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">Sonarr</MudText>
+                    <MudTextField T="string" @bind-Value="_pipeline.SonarrUrl" Label="Address" HelperText="For example http://sonarr:8989" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_pipeline.NewSonarrApiKey" Label="@(_pipeline.HasSonarrApiKey ? "New API key (one is already saved)" : "API key")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_pipeline.ClearSonarrApiKey" Color="Color.Warning">Remove saved API key</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">Radarr</MudText>
+                    <MudTextField T="string" @bind-Value="_pipeline.RadarrUrl" Label="Address" HelperText="For example http://radarr:7878" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_pipeline.NewRadarrApiKey" Label="@(_pipeline.HasRadarrApiKey ? "New API key (one is already saved)" : "API key")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_pipeline.ClearRadarrApiKey" Color="Color.Warning">Remove saved API key</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">Lidarr</MudText>
+                    <MudTextField T="string" @bind-Value="_pipeline.LidarrUrl" Label="Address" HelperText="For example http://lidarr:8686" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_pipeline.NewLidarrApiKey" Label="@(_pipeline.HasLidarrApiKey ? "New API key (one is already saved)" : "API key")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_pipeline.ClearLidarrApiKey" Color="Color.Warning">Remove saved API key</MudSwitch>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.subtitle1">Plex</MudText>
+                    <MudTextField T="string" @bind-Value="_pipeline.PlexUrl" Label="Address" HelperText="The usual address on this network is http://192.168.1.16:32400" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudTextField T="string" @bind-Value="_pipeline.NewPlexToken" Label="@(_pipeline.HasPlexToken ? "New token (one is already saved)" : "Token")" InputType="InputType.Password" Variant="Variant.Outlined" Class="mt-2" />
+                    <MudSwitch T="bool" @bind-Value="_pipeline.ClearPlexToken" Color="Color.Warning">Remove saved token</MudSwitch>
+                </MudItem>
+            </MudGrid>
+            <MudButton Class="mt-4" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large" OnClick="SavePipeline">Save pipeline</MudButton>
+        }
+    </MudTabPanel>
     <MudTabPanel Text="Mounts">
         <MudText Typo="Typo.body2" Class="mb-2 muted">A path counts as mounted only when mountinfo lists that exact path. mergerfs and CIFS mounts are also discovered.</MudText>
         @foreach (var mount in _mounts)
@@ -214,6 +247,7 @@
 
 @code {
     private GeneralEdit? _general;
+    private PipelineEdit? _pipeline;
     private List<MountEdit> _mounts = [];
     private List<LogEdit> _logs = [];
     private List<JobEdit> _jobs = [];
@@ -237,6 +271,7 @@
     private async Task Load()
     {
         _general = await Store.LoadGeneralAsync();
+        _pipeline = await Store.LoadPipelineAsync();
         _mounts = await Store.LoadMountsAsync();
         _logs = await Store.LoadLogsAsync();
         _jobs = await Store.LoadJobsAsync();
@@ -263,6 +298,14 @@
         _general = await Store.LoadGeneralAsync();
         _alerts = (await Store.RecentAlertsAsync()).ToList();
         RememberGeneral();
+    }
+
+    private async Task SavePipeline()
+    {
+        if (_pipeline is null)
+            return;
+        await Finish(await Store.SavePipelineAsync(_pipeline));
+        _pipeline = await Store.LoadPipelineAsync();
     }
 
     private async Task RunSaved()

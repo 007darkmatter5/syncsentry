@@ -33,6 +33,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(item => item.TailscaleStatusPath).HasMaxLength(500);
             entity.Property(item => item.TailscaleSocketPath).HasMaxLength(500);
             entity.Property(item => item.TriggerDirectory).HasMaxLength(500);
+            entity.Property(item => item.SonarrUrl).HasMaxLength(300);
+            entity.Property(item => item.RadarrUrl).HasMaxLength(300);
+            entity.Property(item => item.LidarrUrl).HasMaxLength(300);
+            entity.Property(item => item.PlexUrl).HasMaxLength(300);
         });
 
         builder.Entity<WatchedMount>(entity =>

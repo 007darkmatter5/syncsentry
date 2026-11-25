@@ -9,6 +9,7 @@ It does not mount or unmount anything, and it does not write to media. mergerfs 
 ## What you see
 
 - **Dashboard.** The home page, laid out like the Syncthing web UI. The left column is one card per copy (source folder to destination folder), with a colored status (Up to date, Copying, Waiting, Error, Unknown) and a thin progress bar. Open a card for the paths, what is left, speed, ETA, the last file, and the files moving right now. Finished copies stay on the page with the last time they ran. The right column is this server (download and upload rate, the speed limit, Tailscale accept-routes, uptime, versions) and one card per location (connected, stale, or disconnected, with free space).
+- **Pipeline.** Movies, episodes, and albums from the last 7 days, and how far each one has gotten toward Plex: downloaded, imported on UnraidHive, copied to the UNAS, a Plex scan requested, and confirmed in Plex. The copy and the scan are read from the MediaManny push logs. SyncSentry does not run those scripts. An item that was imported more than two hours ago and is still not copied is marked Stuck. A push line that is not an OK line is treated as a failure. The page works from the logs alone. A stage whose app is not filled in shows as unknown and points at Settings.
 - **Mounts.** The same locations in more detail: mergerfs pools and SMB/CIFS remotes, including a path such as `/mnt/remotes/UNASPRO_Media`. Each row is mounted, unmounted, or unresponsive, with filesystem type, source, and free space when the check returns.
 - **History.** Completed copies for the last 30 days: the folder, the file, where it went, the size, and whether it copied or failed. Syncthing markers, `.partial` files, and rclone temp files are hidden. **Waiting to copy** is the separate list of files still only on the source.
 - **Logs.** Tail, search, and level filter for the log files you configure.
@@ -112,7 +113,32 @@ The speed limit on the dashboard and under Settings is the one control that writ
 
 An RC job is a saved `copy` or `sync` with a source, a destination, and optional include/exclude rules. **Run now** posts `sync/copy` or `sync/sync` with `_async` and a fixed stats group. Paths in an RC job are host paths, because rclone is running on the host. Keep the container's `/mnt/user` and `/mnt/remotes` bind mounts on the same paths so the UI and rclone agree. The log folder is the exception: the host file `/mnt/cache/appdata/mediamanny/logs/initial-copy.log` is `/logs/mediamanny/initial-copy.log` inside the container.
 
-### 6. Logs and the outbox
+### 6. Pipeline
+
+The Pipeline page follows a new movie, episode, or album until Plex has it. Five stages:
+
+1. **Downloaded.** Grabbed, or otherwise completed, in Sonarr, Radarr, or Lidarr.
+2. **Imported.** The import event from that app, on UnraidHive.
+3. **Copied.** The bash push scripts copied the movie folder or the season folder to the UNAS. SyncSentry does not copy anything. It reads `/logs/mediamanny/unas-push-worker.log` (the run that starts when something is imported) and `/logs/mediamanny/unas-push-hourly.log` (the catch-up). A line such as `OK copied: [Movies] Title (123 bytes)` or `OK [TV] Show/Season 1` counts. The page can also confirm the folder under `/mnt/remotes/UNASPRO_Media`.
+4. **Scan asked.** A `PLEX scan asked` line in the same log. Plex paths look like `M:\TV Shows\...` and map onto the UNAS share.
+5. **In Plex.** The Plex library says the file is there.
+
+Log times are America/Chicago. The list defaults to the last 7 days and refreshes on its own.
+
+Open **Settings → Pipeline** and fill in what you want the page to ask. Leave a key blank to keep the one already saved. Keys are encrypted with the data-protection keys in `/config/keys`, they are not written back into the form, and they are not written to the SyncSentry log.
+
+| App | Address | Secret |
+| --- | --- | --- |
+| Sonarr | The Sonarr URL the container can reach, for example `http://sonarr:8989` | API key |
+| Radarr | For example `http://radarr:7878` | API key |
+| Lidarr | For example `http://lidarr:8686` | API key |
+| Plex | Defaults to `http://192.168.1.16:32400` | Plex token |
+
+Sonarr, Radarr, and Lidarr are expected on the `alienhive` Docker network. Any of them can be left blank. That stage then shows as unknown, with a link to Settings, and the rest of the page still works. You can use the page with only the push logs, before any of these are filled in.
+
+The same values can be set from the environment, and those overwrite the saved value on each start: `SyncSentry__Sonarr__Url`, `SyncSentry__Sonarr__ApiKey`, and the same shape for `Radarr`, `Lidarr`, and `Plex` (`Url` and `Token`). Prefer the web UI for the keys so they are not sitting in the Unraid template.
+
+### 7. Logs and the outbox
 
 The seeded log source is `/logs/mediamanny/initial-copy.log`. Point **rclone logs** at the folder that contains it. SyncSentry reads the tail (256 KiB), so a multi-terabyte copy does not have to be loaded whole. A log on a local disk is read directly. A log under `/mnt` or on CIFS, NFS, or FUSE is read from a child process with a timeout.
 
@@ -120,7 +146,7 @@ A log job is treated as running while the file's modification time is within the
 
 Outbox pairs default to `/mnt/user/data/media` → `/mnt/remotes/UNASPRO_Media/media`. Comparison is relative path, size, and modification time (source newer by more than 2 seconds). Destination-only files are not "waiting". The default cap is 200,000 files and 90 seconds. If either side hits the cap, SyncSentry does not invent a pending count from a partial tree. A mounted destination is walked on disk. An rclone remote (`name:path`) is listed through `operations/list` when RC is up, and the response is capped at 48 MB. Scans are cached (default 15 minutes) and run one at a time, off the mount-check loop.
 
-### 7. ntfy
+### 8. ntfy
 
 Set the server URL and topic in the template or in Settings. The access token is only entered in Settings. It is stored encrypted, it is not written back into the form, and log lines that contain `Bearer`, `token=`, or `password=` are scrubbed.
 
@@ -174,6 +200,12 @@ SyncSentry__Demo=true ASPNETCORE_ENVIRONMENT=Development \
 These are the demo fixtures, including a CIFS mount that is pretending to be frozen.
 
 ![Dashboard](docs/images/screenshots/live.png)
+
+![Pipeline](docs/images/screenshots/pipeline.png)
+
+![Pipeline items](docs/images/screenshots/pipeline-items.png)
+
+![Pipeline settings](docs/images/screenshots/pipeline-settings.png)
 
 ![Mounts](docs/images/screenshots/mounts.png)
 

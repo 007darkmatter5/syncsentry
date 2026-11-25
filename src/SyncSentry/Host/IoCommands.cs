@@ -18,6 +18,7 @@ public static class IoCommands
             "--io-probe" => Probe(args),
             "--io-scan" => Scan(args),
             "--io-tail" => Tail(args),
+            "--io-exists" => Exists(args),
             _ => 1
         };
         return true;
@@ -56,6 +57,23 @@ public static class IoCommands
         foreach (var file in result.Files)
             Console.WriteLine(JsonSerializer.Serialize(new ScanLine(file.RelativePath, file.Size, file.MtimeSeconds)));
         return result.Truncated ? 3 : 0;
+    }
+
+    private static int Exists(string[] args)
+    {
+        for (var i = 1; i < args.Length; i++)
+        {
+            try
+            {
+                Console.WriteLine(File.Exists(args[i]) || Directory.Exists(args[i]) ? "yes" : "no");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.WriteLine("no");
+            }
+        }
+
+        return 0;
     }
 
     private static int Tail(string[] args)

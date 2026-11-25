@@ -40,6 +40,26 @@ public sealed class GeneralEdit
     public double ScheduleMegabytes { get; set; } = 1;
 }
 
+public sealed class PipelineEdit
+{
+    public string SonarrUrl { get; set; } = "";
+    public string NewSonarrApiKey { get; set; } = "";
+    public bool ClearSonarrApiKey { get; set; }
+    public bool HasSonarrApiKey { get; set; }
+    public string RadarrUrl { get; set; } = "";
+    public string NewRadarrApiKey { get; set; } = "";
+    public bool ClearRadarrApiKey { get; set; }
+    public bool HasRadarrApiKey { get; set; }
+    public string LidarrUrl { get; set; } = "";
+    public string NewLidarrApiKey { get; set; } = "";
+    public bool ClearLidarrApiKey { get; set; }
+    public bool HasLidarrApiKey { get; set; }
+    public string PlexUrl { get; set; } = "";
+    public string NewPlexToken { get; set; } = "";
+    public bool ClearPlexToken { get; set; }
+    public bool HasPlexToken { get; set; }
+}
+
 public sealed class MountEdit
 {
     public string Name { get; set; } = "";
@@ -173,6 +193,92 @@ public sealed class SettingsStore(IDbContextFactory<ApplicationDbContext> factor
         setting.UpdatedUtc = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
         return null;
+    }
+
+    public async Task<PipelineEdit> LoadPipelineAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var setting = await db.Settings.AsNoTracking().OrderBy(item => item.Id).FirstAsync(cancellationToken);
+        return new PipelineEdit
+        {
+            SonarrUrl = setting.SonarrUrl,
+            HasSonarrApiKey = setting.SonarrApiKeyProtected.Length > 0,
+            RadarrUrl = setting.RadarrUrl,
+            HasRadarrApiKey = setting.RadarrApiKeyProtected.Length > 0,
+            LidarrUrl = setting.LidarrUrl,
+            HasLidarrApiKey = setting.LidarrApiKeyProtected.Length > 0,
+            PlexUrl = setting.PlexUrl,
+            HasPlexToken = setting.PlexTokenProtected.Length > 0
+        };
+    }
+
+    public async Task<string?> SavePipelineAsync(PipelineEdit edit, CancellationToken cancellationToken = default)
+    {
+        var sonarr = CheckApp("Sonarr", edit.SonarrUrl, edit.NewSonarrApiKey, edit.HasSonarrApiKey, edit.ClearSonarrApiKey);
+        if (sonarr is not null)
+            return sonarr;
+        var radarr = CheckApp("Radarr", edit.RadarrUrl, edit.NewRadarrApiKey, edit.HasRadarrApiKey, edit.ClearRadarrApiKey);
+        if (radarr is not null)
+            return radarr;
+        var lidarr = CheckApp("Lidarr", edit.LidarrUrl, edit.NewLidarrApiKey, edit.HasLidarrApiKey, edit.ClearLidarrApiKey);
+        if (lidarr is not null)
+            return lidarr;
+        var plex = CheckApp("Plex", edit.PlexUrl, edit.NewPlexToken, edit.HasPlexToken, edit.ClearPlexToken);
+        if (plex is not null)
+            return plex;
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var setting = await db.Settings.OrderBy(item => item.Id).FirstAsync(cancellationToken);
+        setting.SonarrUrl = edit.SonarrUrl.Trim();
+        setting.RadarrUrl = edit.RadarrUrl.Trim();
+        setting.LidarrUrl = edit.LidarrUrl.Trim();
+        setting.PlexUrl = edit.PlexUrl.Trim();
+        ApplySecret(edit.ClearSonarrApiKey, edit.NewSonarrApiKey, value => setting.SonarrApiKeyProtected = value, () => setting.SonarrApiKeyProtected = "");
+        ApplySecret(edit.ClearRadarrApiKey, edit.NewRadarrApiKey, value => setting.RadarrApiKeyProtected = value, () => setting.RadarrApiKeyProtected = "");
+        ApplySecret(edit.ClearLidarrApiKey, edit.NewLidarrApiKey, value => setting.LidarrApiKeyProtected = value, () => setting.LidarrApiKeyProtected = "");
+        ApplySecret(edit.ClearPlexToken, edit.NewPlexToken, value => setting.PlexTokenProtected = value, () => setting.PlexTokenProtected = "");
+        setting.UpdatedUtc = clock.GetUtcNow();
+        await db.SaveChangesAsync(cancellationToken);
+        return null;
+    }
+
+    private void ApplySecret(bool clear, string incoming, Action<string> store, Action blank)
+    {
+        if (clear)
+            blank();
+        if (!string.IsNullOrEmpty(incoming))
+            store(secrets.Protect(incoming.Trim()));
+    }
+
+    private static string? CheckApp(string name, string url, string secret, bool hasSecret, bool clear)
+    {
+        var address = url.Trim();
+        var key = secret.Trim();
+        if (address.Length > 0 && !Rules.RemoteUrl(address))
+            return name + " address must be a plain http(s) URL with no password in it.";
+        if (key.Length > 0 && !AcceptableSecret(key))
+            return name == "Plex"
+                ? "Plex token must be a single token with no spaces."
+                : name + " API key must be a single token with no spaces.";
+        var keeping = hasSecret && !clear && key.Length == 0;
+        if (address.Length == 0 && (key.Length > 0 || keeping))
+            return name == "Plex"
+                ? "Plex needs an address as well as the token."
+                : name + " needs an address as well as the API key.";
+        return null;
+    }
+
+    private static bool AcceptableSecret(string value)
+    {
+        if (value.Length is < 8 or > 200)
+            return false;
+        foreach (var character in value)
+        {
+            if (char.IsWhiteSpace(character) || char.IsControl(character))
+                return false;
+        }
+
+        return value.IndexOf("://", StringComparison.Ordinal) < 0;
     }
 
     public async Task<List<MountEdit>> LoadMountsAsync(CancellationToken cancellationToken = default)
