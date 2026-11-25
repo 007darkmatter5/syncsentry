@@ -39,6 +39,7 @@ public static partial class SecretRedactor
         var value = UrlUserInfo().Replace(text, "$1");
         value = Bearer().Replace(value, "Bearer [redacted]");
         value = NamedSecret().Replace(value, "$1=[redacted]");
+        value = ApiKey().Replace(value, "$1=[redacted]");
         return value;
     }
 
@@ -58,6 +59,9 @@ public static partial class SecretRedactor
 
     [GeneratedRegex(@"(?i)\b(password|passwd|token|secret|rc-pass|authorization)\b\s*[:=]\s*\S+")]
     private static partial Regex NamedSecret();
+
+    [GeneratedRegex(@"(?i)\b(apikey|api_key|api-key|x-api-key|x-plex-token)\b\s*[:=]\s*\S+")]
+    private static partial Regex ApiKey();
 }
 
 public static class Crypto
@@ -71,7 +75,11 @@ public static class SecretEnvironment
     public static readonly string[] Keys =
     [
         "SyncSentry__Rclone__RcPassword",
-        "SyncSentry__Ntfy__Token"
+        "SyncSentry__Ntfy__Token",
+        "SyncSentry__Sonarr__ApiKey",
+        "SyncSentry__Radarr__ApiKey",
+        "SyncSentry__Lidarr__ApiKey",
+        "SyncSentry__Plex__Token"
     ];
 
     public static void RemoveFrom(IDictionary<string, string?> environment)

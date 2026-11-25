@@ -247,6 +247,7 @@ public static class DemoFiles
             {stamp} ERROR : shows/Pilot.mkv: Failed to copy: connection reset by peer
             """);
 
+        DemoPipeline.Write(DateTimeOffset.Now);
         var tail = Path.Combine(Root, "tailscale.json");
         File.WriteAllText(tail, "{\"acceptRoutes\": true, \"backendState\": \"Running\"}\n");
         File.WriteAllText(Path.Combine(Root, "unraid-customizations.json"), CustomizationsSample.Json);

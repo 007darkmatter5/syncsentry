@@ -282,6 +282,15 @@ namespace SyncSentry.Data.Migrations
                     b.Property<int>("HistoryDays")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("LidarrApiKeyProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LidarrUrl")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("LogStaleSeconds")
                         .HasColumnType("INTEGER");
 
@@ -302,11 +311,29 @@ namespace SyncSentry.Data.Migrations
                     b.Property<int>("OutboxCacheMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("PlexTokenProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlexUrl")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("PollSeconds")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("ProbeTimeoutSeconds")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("RadarrApiKeyProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RadarrUrl")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("RcPasswordProtected")
                         .IsRequired()
@@ -336,6 +363,15 @@ namespace SyncSentry.Data.Migrations
 
                     b.Property<int>("ScheduleStartHour")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("SonarrApiKeyProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SonarrUrl")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("TailscaleSocketPath")
                         .IsRequired()

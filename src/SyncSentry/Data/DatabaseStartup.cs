@@ -121,6 +121,31 @@ public static class DatabaseStartup
             changed = true;
         }
 
+        changed |= Set(configuration["SyncSentry:Sonarr:Url"], value =>
+        {
+            if (Rules.RemoteUrl(value))
+                setting.SonarrUrl = value;
+        });
+        changed |= ProtectSecret(configuration["SyncSentry:Sonarr:ApiKey"], value => setting.SonarrApiKeyProtected = protector.Protect(value));
+        changed |= Set(configuration["SyncSentry:Radarr:Url"], value =>
+        {
+            if (Rules.RemoteUrl(value))
+                setting.RadarrUrl = value;
+        });
+        changed |= ProtectSecret(configuration["SyncSentry:Radarr:ApiKey"], value => setting.RadarrApiKeyProtected = protector.Protect(value));
+        changed |= Set(configuration["SyncSentry:Lidarr:Url"], value =>
+        {
+            if (Rules.RemoteUrl(value))
+                setting.LidarrUrl = value;
+        });
+        changed |= ProtectSecret(configuration["SyncSentry:Lidarr:ApiKey"], value => setting.LidarrApiKeyProtected = protector.Protect(value));
+        changed |= Set(configuration["SyncSentry:Plex:Url"], value =>
+        {
+            if (Rules.RemoteUrl(value))
+                setting.PlexUrl = value;
+        });
+        changed |= ProtectSecret(configuration["SyncSentry:Plex:Token"], value => setting.PlexTokenProtected = protector.Protect(value));
+
         if (changed)
             setting.UpdatedUtc = now;
     }
@@ -198,6 +223,14 @@ public static class DatabaseStartup
     }
 
     private static bool Set(string? value, Action<string> apply)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        apply(value.Trim());
+        return true;
+    }
+
+    private static bool ProtectSecret(string? value, Action<string> apply)
     {
         if (string.IsNullOrWhiteSpace(value))
             return false;
