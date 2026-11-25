@@ -59,7 +59,7 @@ public static class DemoPipeline
         var bogusImport = now.AddHours(-3);
         return
         [
-            Movie("witches", "The Witches of Eastwick (1987)", Witches, "imdb:tt0094332", witchesGrab, witchesImport, false, null),
+            WithUpgrade(Movie("witches", "The Witches of Eastwick (1987)", Witches, "imdb:tt0094332", witchesGrab, witchesImport, false, null), now.AddHours(-1)),
             Movie("holdovers", Holdovers, Holdovers, "imdb:tt14849194", holdGrab, holdImport, false, null),
             Movie("bogus", Bogus, Bogus, null, bogusGrab, bogusImport, false, null),
             Episode("oak-5", "The Curse of Oak Island (2014) · S14E05", Oak + "/Season 14", Oak + "/Season 14/The Curse of Oak Island S14E05.mkv", oakGrab, oakImport),
@@ -82,10 +82,66 @@ public static class DemoPipeline
     }
 
     private static ArrItem Movie(string id, string title, string folder, string? external, DateTimeOffset grabbed, DateTimeOffset? imported, bool failed, string? failure)
-        => new("Radarr", "movie", id, title, "Movies", "Movies", imported is null ? "" : folder, imported is null ? null : folder + "/" + title + ".mkv", external, grabbed, imported, failed, failure);
+    {
+        var events = new List<ArrEvent>
+        {
+            new("grabbed", "grab", grabbed, "dl-" + id, title + ".1080p", "Bluray-1080p", 9_378_868_615, null)
+        };
+        if (imported is not null)
+            events.Add(new ArrEvent("downloadFolderImported", "import", imported.Value, "dl-" + id, title + ".1080p", "Bluray-1080p", 9_378_868_615, null));
+        if (failed)
+            events.Add(new ArrEvent("downloadFailed", "fail", grabbed, "dl-" + id, title, null, null, failure));
+        return new ArrItem(
+            "Radarr", "movie", "movie:" + id, title, "Movies", "Movies",
+            imported is null ? "" : folder,
+            imported is null ? null : folder + "/" + title + ".mkv",
+            external, grabbed, imported, failed, failure,
+            HasFile: imported is not null,
+            DownloadId: "dl-" + id,
+            TitleSlug: Slug(title),
+            MediaId: 1,
+            Events: events);
+    }
+
+    private static ArrItem WithUpgrade(ArrItem movie, DateTimeOffset when)
+    {
+        var events = (movie.Events ?? []).ToList();
+        events.Add(new ArrEvent("downloadFailed", "fail", when, "dl-" + movie.Identity + "-upgrade", movie.Title + ".2160p", "Remux-2160p", null, "SAB: Aborted, not complete"));
+        return movie with
+        {
+            DownloadFailed = true,
+            Failure = "SAB: Aborted, not complete",
+            Events = events
+        };
+    }
 
     private static ArrItem Episode(string id, string title, string folder, string? file, DateTimeOffset grabbed, DateTimeOffset? imported)
-        => new("Sonarr", "episode", id, title, "TV", "TV Shows", imported is null ? "" : folder, imported is null ? null : file, null, grabbed, imported, false, null);
+    {
+        var events = new List<ArrEvent>
+        {
+            new("grabbed", "grab", grabbed, "dl-" + id, title, "HDTV-1080p", 1_200_000_000, null)
+        };
+        if (imported is not null)
+            events.Add(new ArrEvent("downloadFolderImported", "import", imported.Value, "dl-" + id, title, "HDTV-1080p", 1_200_000_000, null));
+        return new ArrItem(
+            "Sonarr", "episode", "episode:" + id, title, "TV", "TV Shows",
+            imported is null ? "" : folder, imported is null ? null : file, null, grabbed, imported, false, null,
+            HasFile: imported is not null,
+            DownloadId: "dl-" + id,
+            Season: 14,
+            Episode: id.EndsWith('6') ? 6 : 5,
+            SeriesGuid: "tvdb:269613",
+            TitleSlug: "the-curse-of-oak-island",
+            MediaId: 14,
+            Events: events);
+    }
+
+    private static string Slug(string title)
+    {
+        var text = title.ToLowerInvariant();
+        var chars = text.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray();
+        return string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+    }
 
     private static string Line(DateTimeOffset utc, string text)
         => PipelineTime.FormatLocal(utc) + " " + text;

@@ -28,7 +28,20 @@ public sealed record ArrItem(
     string? SeriesGuid = null,
     string? AlsoGuid = null,
     bool DownloadSettled = false,
-    int? SeriesId = null);
+    int? SeriesId = null,
+    string? TitleSlug = null,
+    int? MediaId = null,
+    IReadOnlyList<ArrEvent>? Events = null);
+
+public sealed record ArrEvent(
+    string EventType,
+    string Kind,
+    DateTimeOffset When,
+    string? DownloadId,
+    string? Release,
+    string? Quality,
+    long? Bytes,
+    string? Failure);
 
 public sealed record ArrFetch(bool Attempted, bool Ok, string? Problem, IReadOnlyList<ArrItem> Items)
 {
@@ -351,7 +364,10 @@ public static class ArrHistoryParser
                     ExternalId = import.ExternalId ?? item.ExternalId,
                     Season = import.Season ?? item.Season,
                     Episode = import.Episode ?? item.Episode,
-                    SeriesId = import.SeriesId ?? item.SeriesId
+                    SeriesId = import.SeriesId ?? item.SeriesId,
+                    TitleSlug = import.TitleSlug ?? item.TitleSlug,
+                    MediaId = import.MediaId ?? item.MediaId,
+                    Events = JoinEvents(import.Events, item.Events)
                 };
                 drop.Add(i);
                 continue;
@@ -394,29 +410,90 @@ public static class ArrHistoryParser
             var failure = failed ? (item.Failure ?? current.Failure) : null;
             var title = current.Title.Length >= item.Title.Length ? current.Title : item.Title;
             var dismissed = (current.Dismissed || item.Dismissed) && imported is null;
-            map[key] = current with
-            {
-                Title = title,
-                RelativeFolder = relative ?? "",
-                RelativeFile = file,
-                ExternalId = external,
-                GrabbedUtc = grabbed,
-                ImportedUtc = imported,
-                DownloadFailed = failed,
-                Failure = failure,
-                HasFile = current.HasFile || item.HasFile,
-                Dismissed = dismissed,
-                DownloadId = current.DownloadId ?? item.DownloadId,
-                Season = current.Season ?? item.Season,
-                Episode = current.Episode ?? item.Episode,
-                SeriesGuid = current.SeriesGuid ?? item.SeriesGuid,
-                AlsoGuid = current.AlsoGuid ?? item.AlsoGuid,
-                DownloadSettled = current.DownloadSettled || item.DownloadSettled,
-                SeriesId = current.SeriesId ?? item.SeriesId
-            };
+            map[key] = Fold(current, item, title, relative ?? "", file, external, grabbed, imported, failed, failure, dismissed);
         }
 
         return map.Values.ToList();
+    }
+
+    public static ArrItem Combine(IReadOnlyList<ArrItem> items)
+    {
+        var current = items[0];
+        for (var i = 1; i < items.Count; i++)
+        {
+            var item = items[i];
+            var grabbed = Earlier(current.GrabbedUtc, item.GrabbedUtc);
+            var imported = Earlier(current.ImportedUtc, item.ImportedUtc);
+            var failedAt = Later(current.DownloadFailed ? current.GrabbedUtc ?? current.ImportedUtc : null, item.DownloadFailed ? item.GrabbedUtc ?? item.ImportedUtc : null);
+            var failed = failedAt is not null && (imported is null || failedAt > imported);
+            var title = current.Title.Length >= item.Title.Length ? current.Title : item.Title;
+            current = Fold(
+                current,
+                item,
+                title,
+                Prefer(current.RelativeFolder, item.RelativeFolder) ?? "",
+                Prefer(current.RelativeFile, item.RelativeFile),
+                current.ExternalId ?? item.ExternalId,
+                grabbed,
+                imported,
+                failed,
+                failed ? item.Failure ?? current.Failure : null,
+                (current.Dismissed || item.Dismissed) && imported is null);
+        }
+
+        return current;
+    }
+
+    private static ArrItem Fold(
+        ArrItem current,
+        ArrItem item,
+        string title,
+        string relative,
+        string? file,
+        string? external,
+        DateTimeOffset? grabbed,
+        DateTimeOffset? imported,
+        bool failed,
+        string? failure,
+        bool dismissed)
+    {
+        var identity = current.Identity.StartsWith("title:", StringComparison.OrdinalIgnoreCase)
+            && !item.Identity.StartsWith("title:", StringComparison.OrdinalIgnoreCase)
+            ? item.Identity
+            : current.Identity;
+        return current with
+        {
+            Identity = identity,
+            Title = title,
+            RelativeFolder = relative,
+            RelativeFile = file,
+            ExternalId = external,
+            GrabbedUtc = grabbed,
+            ImportedUtc = imported,
+            DownloadFailed = failed,
+            Failure = failure,
+            HasFile = current.HasFile || item.HasFile,
+            Dismissed = dismissed,
+            DownloadId = current.DownloadId ?? item.DownloadId,
+            Season = current.Season ?? item.Season,
+            Episode = current.Episode ?? item.Episode,
+            SeriesGuid = current.SeriesGuid ?? item.SeriesGuid,
+            AlsoGuid = current.AlsoGuid ?? item.AlsoGuid,
+            DownloadSettled = current.DownloadSettled || item.DownloadSettled,
+            SeriesId = current.SeriesId ?? item.SeriesId,
+            TitleSlug = current.TitleSlug ?? item.TitleSlug,
+            MediaId = current.MediaId ?? item.MediaId,
+            Events = JoinEvents(current.Events, item.Events)
+        };
+    }
+
+    private static IReadOnlyList<ArrEvent>? JoinEvents(IReadOnlyList<ArrEvent>? left, IReadOnlyList<ArrEvent>? right)
+    {
+        if (left is null || left.Count == 0)
+            return right;
+        if (right is null || right.Count == 0)
+            return left;
+        return left.Concat(right).OrderBy(item => item.When).ThenBy(item => item.EventType, StringComparer.Ordinal).ToList();
     }
 
     private static ArrItem? ReadRecord(string app, JsonElement record)
@@ -444,6 +521,8 @@ public static class ArrHistoryParser
         int? seasonNumber = null;
         int? episodeNumber = null;
         int? seriesId = null;
+        string? titleSlug = null;
+        int? mediaId = null;
 
         if (app.Equals("Radarr", StringComparison.OrdinalIgnoreCase))
         {
@@ -466,6 +545,8 @@ public static class ArrHistoryParser
             relativeFile = FileTail(relative, movieLibraryFile);
             external = ExternalMovie(movie);
             hasFile = Bool(movie, "hasFile") || HasObject(record, "movieFile");
+            titleSlug = Blank(First(movie, "titleSlug"));
+            mediaId = Int(movie, "id") ?? Int(record, "movieId");
         }
         else if (app.Equals("Lidarr", StringComparison.OrdinalIgnoreCase))
         {
@@ -487,6 +568,8 @@ public static class ArrHistoryParser
             var mbid = First(album, "foreignAlbumId");
             external = mbid.Length > 0 ? "mbid:" + mbid : null;
             hasFile = Bool(album, "hasFile") || HasObject(record, "albumFile");
+            titleSlug = Blank(First(artist, "titleSlug"));
+            mediaId = Int(album, "id") ?? Int(record, "albumId");
         }
         else
         {
@@ -507,6 +590,8 @@ public static class ArrHistoryParser
                 : source;
             libraryTag = "TV";
             seriesId = Int(series, "id") ?? Int(record, "seriesId");
+            titleSlug = Blank(First(series, "titleSlug"));
+            mediaId = seriesId;
             var seriesPath = First(series, "path");
             var showFolder = FolderName(seriesPath);
             var episodeFilePath = First(Object(record, "episodeFile"), "path");
@@ -576,7 +661,51 @@ public static class ArrHistoryParser
             seriesGuid,
             alsoGuid,
             false,
-            seriesId);
+            seriesId,
+            titleSlug,
+            mediaId,
+            [
+                new ArrEvent(
+                    String(record, "eventType"),
+                    kind,
+                    when,
+                    downloadId.Length == 0 ? null : downloadId,
+                    Blank(source),
+                    Blank(QualityName(record)),
+                    data.ValueKind == JsonValueKind.Object ? SizeOf(data) : null,
+                    failure)
+            ]);
+    }
+
+    private static string? Blank(string text) => text.Length == 0 ? null : text;
+
+    private static string QualityName(JsonElement record)
+    {
+        if (!record.TryGetProperty("quality", out var quality) || quality.ValueKind != JsonValueKind.Object)
+            return "";
+        if (quality.TryGetProperty("quality", out var inner) && inner.ValueKind == JsonValueKind.Object)
+        {
+            var name = First(inner, "name");
+            if (name.Length > 0)
+                return name;
+        }
+
+        return First(quality, "name");
+    }
+
+    private static long? SizeOf(JsonElement data)
+    {
+        foreach (var name in new[] { "size", "fileSize" })
+        {
+            if (!data.TryGetProperty(name, out var value))
+                continue;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number))
+                return number;
+            if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                return parsed;
+        }
+
+        return null;
     }
 
     private static string Classify(string eventType)

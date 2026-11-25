@@ -114,6 +114,101 @@ public class PipelineAccuracyTests
     }
 
     [Fact]
+    public void One_title_lists_each_download_and_links_to_radarr()
+    {
+        var originalGrab = Now.AddDays(-3);
+        var originalImport = originalGrab.AddMinutes(20);
+        var upgradeAt = Now.AddDays(-1);
+        var original = new ArrItem(
+            "Radarr", "movie", "movie:7", "Batman Begins (2005)", "Movies", "Movies",
+            "Batman Begins (2005)", null, "imdb:tt0372784", originalGrab, originalImport, false, null,
+            TitleSlug: "batman-begins-2005",
+            Events:
+            [
+                new ArrEvent("grabbed", "grab", originalGrab, "dl-1", "Batman.Begins.2005.1080p", "Bluray-1080p", 8_000_000_000, null),
+                new ArrEvent("downloadFolderImported", "import", originalImport, "dl-1", "Batman.Begins.2005.1080p", "Bluray-1080p", 8_000_000_000, null)
+            ]);
+        var upgrade = new ArrItem(
+            "Radarr", "movie", "title:Batman.Begins.2160p", "Batman Begins (2005)", "Movies", "Movies",
+            "", null, null, upgradeAt, null, true, "SAB: Aborted, not complete",
+            Events:
+            [
+                new ArrEvent("downloadFailed", "fail", upgradeAt, "dl-2", "Batman.Begins.2005.2160p", "Remux-2160p", null, "SAB: Aborted, not complete")
+            ]);
+        var hit = new PlexHit("Batman Begins", "movie", "Movies", "Batman Begins (2005)", ["imdb:tt0372784"], originalImport.AddMinutes(30), Year: 2005);
+        var sources = new PipelineSources(
+            new SourceLink(false, null),
+            new SourceLink(true, null, "http://radarr.local:7878"),
+            new SourceLink(false, null),
+            new SourceLink(true, null));
+        var shown = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, [], [original, upgrade], [hit], sources, new HashSet<string>(), false, false)).Items);
+        Assert.Equal("in-plex", shown.Badge);
+        Assert.Equal(2, shown.Journeys.Count);
+        Assert.Contains("→ In Plex", shown.Journeys[0].Text, StringComparison.Ordinal);
+        Assert.StartsWith("Upgrade: Downloaded → Failed (SAB: Aborted, not complete)", shown.Journeys[1].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("In Plex", shown.Journeys[1].Text, StringComparison.Ordinal);
+        Assert.Equal("http://radarr.local:7878/movie/batman-begins-2005", shown.AppHref);
+        Assert.Contains(shown.Timeline, entry => entry.Source == "Radarr" && entry.Action == "downloadFailed" && entry.Quality == "Remux-2160p" && entry.Release == "Batman.Begins.2005.2160p");
+        Assert.Equal("movie", shown.Kind);
+        Assert.Equal(PipelineBuilder.RouteIdFor("Radarr|movie:7"), shown.RouteId);
+    }
+
+    [Fact]
+    public void Episodes_of_the_same_show_stay_separate_cards()
+    {
+        ArrItem Episode(int number) => new(
+            "Sonarr", "episode", "episode:" + number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "The Chosen (2019) · S4E" + number.ToString("00", System.Globalization.CultureInfo.InvariantCulture),
+            "TV", "TV Shows", "", null, null, Now.AddHours(-1), null, false, null,
+            Season: 4, Episode: number, SeriesGuid: "tvdb:1");
+        var sources = new PipelineSources(new SourceLink(true, null), new SourceLink(false, null), new SourceLink(false, null), new SourceLink(false, null));
+        var items = PipelineBuilder.Build(new PipelineInput(Now, 7, [], [Episode(1), Episode(2)], [], sources, new HashSet<string>(), false, false)).Items;
+        Assert.Equal(2, items.Count);
+    }
+
+    [Fact]
+    public void A_failed_copy_stays_on_the_original_journey()
+    {
+        var imported = Now.AddHours(-1);
+        var grabbed = imported.AddMinutes(-10);
+        var movie = new ArrItem(
+            "Radarr", "movie", "movie:9", "Bogus Movie (2024)", "Movies", "Movies",
+            "Bogus Movie (2024)", null, null, grabbed, imported, false, null, HasFile: true,
+            DownloadId: "dl-9",
+            Events:
+            [
+                new ArrEvent("grabbed", "grab", grabbed, "dl-9", "Bogus.Movie", "WEBDL-1080p", 1000, null),
+                new ArrEvent("downloadFolderImported", "import", imported, "dl-9", "Bogus.Movie", "WEBDL-1080p", 1000, null)
+            ]);
+        var lines = UnasPushLog.Parse(PipelineTime.FormatLocal(imported.AddMinutes(5)) + " could not copy [Movies] Bogus Movie (2024): permission denied\n");
+        var sources = new PipelineSources(new SourceLink(false, null), new SourceLink(true, null), new SourceLink(false, null), new SourceLink(false, null));
+        var shown = Assert.Single(PipelineBuilder.Build(new PipelineInput(Now, 7, lines, [movie], [], sources, new HashSet<string>(), false, false)).Items);
+        var journey = Assert.Single(shown.Journeys);
+        Assert.False(journey.Upgrade);
+        Assert.Contains("Downloaded → Imported → Failed", journey.Text, StringComparison.Ordinal);
+        Assert.Contains("permission denied", journey.Text, StringComparison.Ordinal);
+        Assert.Equal("failed", shown.Badge);
+    }
+
+    [Fact]
+    public void History_keeps_quality_release_and_every_event()
+    {
+        var json = """
+            {"records":[
+              {"sourceTitle":"Batman.Begins.2005.1080p","quality":{"quality":{"name":"Bluray-1080p"}},"date":"2026-11-22T12:00:00Z","eventType":"grabbed","downloadId":"dl-1","movie":{"id":7,"title":"Batman Begins","year":2005,"titleSlug":"batman-begins-2005","imdbId":"tt0372784"},"data":{"size":8000}},
+              {"sourceTitle":"Batman.Begins.2005.2160p","quality":{"quality":{"name":"Remux-2160p"}},"date":"2026-11-24T12:00:00Z","eventType":"downloadFailed","downloadId":"dl-2","movie":{"id":7,"title":"Batman Begins","year":2005,"titleSlug":"batman-begins-2005"},"data":{"message":"SAB: Aborted, not complete"}}
+            ]}
+            """;
+        var item = Assert.Single(ArrHistoryParser.Read("Radarr", json));
+        Assert.Equal(2, item.Events!.Count);
+        Assert.Equal("Bluray-1080p", item.Events[0].Quality);
+        Assert.Equal("Batman.Begins.2005.1080p", item.Events[0].Release);
+        Assert.Equal(8000, item.Events[0].Bytes);
+        Assert.Equal("batman-begins-2005", item.TitleSlug);
+        Assert.Equal("SAB: Aborted, not complete", item.Events[1].Failure);
+    }
+
+    [Fact]
     public void Sonarr_episode_files_supply_the_season_folder_when_history_has_no_path()
     {
         var json = """

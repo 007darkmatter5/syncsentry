@@ -115,11 +115,11 @@ An RC job is a saved `copy` or `sync` with a source, a destination, and optional
 
 ### 6. Pipeline
 
-The Pipeline page follows a new movie, episode, or album until Plex has it. Five stages:
+The Pipeline page follows a new movie, episode, or album until Plex has it. Each title is one card. A card lists that title's downloads as separate journeys, such as `Downloaded → Imported → Copied → In Plex (Nov 11)` and `Upgrade: Downloaded → Failed (SAB: Aborted, not complete) (Nov 24)`. Open the title for the full timeline and a link to the item in Sonarr, Radarr, or Lidarr when that app is configured. Filter the list by title. The counters count titles. A failed upgrade of a title already in Plex stays In Plex and is not counted as Failed. Five stages:
 
 1. **Downloaded.** Grabbed, or otherwise completed, in Sonarr, Radarr, or Lidarr.
 2. **Imported.** The import event from that app, on UnraidHive.
-3. **Copied.** The bash push scripts copied the movie folder or the season folder to the UNAS. SyncSentry does not copy anything. It reads `/logs/mediamanny/unas-push-worker.log` (the run that starts when something is imported) and `/logs/mediamanny/unas-push-hourly.log` (the catch-up). A line such as `OK copied: [Movies] Title (123 bytes)` or `OK [TV] Show/Season 1` counts. The page can also confirm the folder under `/mnt/remotes/UNASPRO_Media`. When a Sonarr grab has a file but no path, the page asks Sonarr for the episode file, or the series path plus its season folder, and matches that directory on disk.
+3. **Copied.** The bash push scripts copied the movie folder or the season folder to the UNAS. SyncSentry does not copy anything. It reads `/logs/mediamanny/unas-push-worker.log` (the run that starts when something is imported) and `/logs/mediamanny/unas-push-hourly.log` (the catch-up). A line such as `OK copied: [Movies] Title (123 bytes)` or `OK [TV] Show/Season 1` counts. The page can also confirm the folder under `/mnt/remotes/UNASPRO_Media`. When a Sonarr grab has a file but no path, the page asks Sonarr for the episode file, or the series path plus its season folder, and matches that directory on disk. A season folder such as `Season 04` is kept as Sonarr stored it.
 4. **Scan asked.** A `PLEX scan asked` line in the same log. Plex paths look like `M:\TV Shows\...` and map onto the UNAS share.
 5. **In Plex.** The file is in the Plex library. SyncSentry keeps an index of each movie, episode, and track: the external ids on the item, the `M:\<Library>\...` file path, and the title and year. The index is refreshed every few minutes, not once per item. An episode matches when its path matches, or when the show and the season and episode number match. A title that is already in Plex stays In Plex when a later upgrade download fails. The card notes that, and it is not counted under Failed.
 
@@ -204,6 +204,8 @@ These are the demo fixtures, including a CIFS mount that is pretending to be fro
 ![Pipeline](docs/images/screenshots/pipeline.png)
 
 ![Pipeline items](docs/images/screenshots/pipeline-items.png)
+
+![Pipeline detail](docs/images/screenshots/pipeline-detail.png)
 
 ![Pipeline settings](docs/images/screenshots/pipeline-settings.png)
 

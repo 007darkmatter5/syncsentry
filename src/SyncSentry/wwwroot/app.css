@@ -322,10 +322,44 @@ button.mud-nav-link {
 
 .pipe-head {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 12rem;
-    gap: 1.5rem;
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem) 12rem;
+    gap: 1rem;
     align-items: end;
     margin-bottom: .75rem;
+}
+
+.journey-list {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+    margin-top: .85rem;
+}
+
+.journey-line {
+    font-size: .92rem;
+    line-height: 1.45;
+}
+
+.journey-warn {
+    color: var(--mud-palette-warning);
+}
+
+.timeline-row {
+    display: grid;
+    grid-template-columns: 9.5rem minmax(0, 1fr);
+    gap: .75rem;
+    padding: .55rem 0;
+    border-top: 1px solid var(--mud-palette-lines-default);
+}
+
+.timeline-when {
+    font-variant-numeric: tabular-nums;
+    color: var(--mud-palette-text-secondary);
+    font-size: .85rem;
+}
+
+.timeline-what {
+    font-weight: 650;
 }
 
 .pipe {
@@ -384,6 +418,11 @@ button.mud-nav-link {
 @media (max-width: 700px) {
     .pipe-head {
         grid-template-columns: 1fr;
+    }
+
+    .timeline-row {
+        grid-template-columns: 1fr;
+        gap: .15rem;
     }
 
     .pipe {

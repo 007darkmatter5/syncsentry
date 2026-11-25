@@ -265,7 +265,7 @@ public sealed class PipelineRefresher(
         var checks = DiskChecks(arrItems, lines);
         var present = await folders.PresentAsync(unasRoot, checks, cancellationToken);
         var sources = demo
-            ? new PipelineSources(new SourceLink(true, null), new SourceLink(true, null), ArrLink(setting.LidarrUrl, setting.LidarrApiKeyProtected, lidarrKey, lidarr), new SourceLink(true, null))
+            ? new PipelineSources(new SourceLink(true, null, "http://sonarr.local:8989"), new SourceLink(true, null, "http://radarr.local:7878"), ArrLink(setting.LidarrUrl, setting.LidarrApiKeyProtected, lidarrKey, lidarr), new SourceLink(true, null))
             : new PipelineSources(
                 ArrLink(setting.SonarrUrl, setting.SonarrApiKeyProtected, sonarrKey, sonarr),
                 ArrLink(setting.RadarrUrl, setting.RadarrApiKeyProtected, radarrKey, radarr),
@@ -320,19 +320,19 @@ public sealed class PipelineRefresher(
     private static SourceLink ArrLink(string url, string protectedValue, string? secret, ArrFetch fetch)
     {
         if (protectedValue.Length > 0 && secret is null && Rules.RemoteUrl(url))
-            return new SourceLink(true, "unreadable");
+            return new SourceLink(true, "unreadable", url.Trim());
         if (!Configured(url, secret))
             return new SourceLink(false, null);
-        return new SourceLink(true, fetch.Ok ? null : fetch.Problem ?? "unreachable");
+        return new SourceLink(true, fetch.Ok ? null : fetch.Problem ?? "unreachable", url.Trim());
     }
 
     private static SourceLink PlexLink(string url, string protectedValue, string? secret, PlexFetch fetch)
     {
         if (protectedValue.Length > 0 && secret is null && Rules.RemoteUrl(url))
-            return new SourceLink(true, "unreadable");
+            return new SourceLink(true, "unreadable", url.Trim());
         if (!Configured(url, secret))
             return new SourceLink(false, null);
-        return new SourceLink(true, fetch.Ok ? null : fetch.Problem ?? "unreachable");
+        return new SourceLink(true, fetch.Ok ? null : fetch.Problem ?? "unreachable", url.Trim());
     }
 
     private static bool Missing(LogRead read)

@@ -22,6 +22,12 @@ public static class PipelineTime
     public static string FormatLocal(DateTimeOffset utc)
         => TimeZoneInfo.ConvertTime(utc, Zone).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    public static string FormatDay(DateTimeOffset utc)
+        => TimeZoneInfo.ConvertTime(utc, Zone).ToString("MMM d", CultureInfo.InvariantCulture);
+
+    public static string FormatStamp(DateTimeOffset utc)
+        => TimeZoneInfo.ConvertTime(utc, Zone).ToString("MMM d, HH:mm", CultureInfo.InvariantCulture);
+
     private static TimeZoneInfo Resolve()
     {
         foreach (var id in new[] { "America/Chicago", "Central Standard Time" })
