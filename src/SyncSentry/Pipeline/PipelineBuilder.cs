@@ -1,6 +1,6 @@
 namespace SyncSentry.Pipeline;
 
-public sealed record SourceLink(bool Configured, string? Problem);
+public sealed record SourceLink(bool Configured, string? Problem, string? Url = null);
 
 public sealed record PipelineSources(SourceLink Sonarr, SourceLink Radarr, SourceLink Lidarr, SourceLink Plex);
 
@@ -17,7 +17,12 @@ public sealed record PipelineItem(
     string? Problem,
     string? Elapsed,
     IReadOnlyList<StageMark> Stages,
-    DateTimeOffset SortTime);
+    DateTimeOffset SortTime,
+    string Kind,
+    string RouteId,
+    IReadOnlyList<Journey> Journeys,
+    IReadOnlyList<TimelineEntry> Timeline,
+    string? AppHref);
 
 public sealed record PipelineInput(
     DateTimeOffset Now,
@@ -49,8 +54,9 @@ public static class PipelineBuilder
         var folders = UnasPushLog.Fold(input.Lines);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var items = new List<PipelineItem>();
-        foreach (var arr in input.Arr)
+        foreach (var group in Clusters(input.Arr))
         {
+            var arr = group.Count == 1 ? group[0] : ArrHistoryParser.Combine(group);
             var folder = MatchFolder(arr, folders);
             if (folder is not null)
                 used.Add(FolderKey.DiskKey(folder.LibraryTag, folder.RelativeFolder));
@@ -94,6 +100,15 @@ public static class PipelineBuilder
             ScanStage(scanAt, logsKnown),
             PlexStage(plex, input)
         };
+        string? upgrade = null;
+        if (stages[^1].State == "done" && arr.DownloadFailed)
+        {
+            if (stages[0].State == "failed")
+                stages[0] = new StageMark("Downloaded", "done", stages[0].At, null);
+            upgrade = "Upgrade download failed.";
+        }
+
+        var story = PipelineJourneys.Collect(arr, folder, plex, OnDisk(arr, input), arr.App);
         return Finish(
             arr.App + "|" + arr.Identity,
             arr.Title,
@@ -102,7 +117,12 @@ public static class PipelineBuilder
             arr.App,
             copied.Bytes,
             stages,
-            input.Now);
+            input.Now,
+            upgrade,
+            RouteKind(arr.Kind),
+            story.Journeys,
+            story.Timeline,
+            AppHref(arr, input.Sources));
     }
 
     private static PipelineItem FromFolder(PushFolder folder, PipelineInput input)
@@ -121,6 +141,7 @@ public static class PipelineBuilder
             ScanStage(scanAt, logsKnown: true),
             PlexStage(plex, input)
         };
+        var story = PipelineJourneys.Collect(null, folder, plex, OnDiskFolder(folder, input), "push log");
         return Finish(
             "log|" + FolderKey.DiskKey(folder.LibraryTag, folder.RelativeFolder),
             folder.RelativeFolder.Replace("/", " / ", StringComparison.Ordinal),
@@ -129,7 +150,12 @@ public static class PipelineBuilder
             "push log",
             copied.Bytes,
             stages,
-            input.Now);
+            input.Now,
+            null,
+            "folder",
+            story.Journeys,
+            story.Timeline,
+            null);
     }
 
     private static StageMark DownloadStage(ArrItem arr)
@@ -192,14 +218,19 @@ public static class PipelineBuilder
         string key,
         string title,
         string library,
-        string kind,
+        string label,
         string source,
         long? bytes,
         IReadOnlyList<StageMark> stages,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string? note,
+        string routeKind,
+        IReadOnlyList<Journey> journeys,
+        IReadOnlyList<TimelineEntry> timeline,
+        string? appHref)
     {
         var badge = BadgeFor(stages);
-        var problem = ProblemFor(stages, now);
+        var problem = note ?? (stages[^1].State == "done" ? null : ProblemFor(stages, now));
         var times = stages.Where(stage => stage.At is not null).Select(stage => stage.At!.Value).ToList();
         var plexAt = stages[^1].State == "done" ? stages[^1].At : null;
         string? elapsed = null;
@@ -213,23 +244,43 @@ public static class PipelineBuilder
             elapsed = plexAt is not null ? "Reached Plex in " + text : text + " so far";
         }
 
-        var bits = new List<string> { library, kind, source };
+        var bits = new List<string> { library, label, source };
         if (bytes is > 0)
             bits.Add(Text.TextFormat.Bytes(bytes.Value));
         if (elapsed is not null)
             bits.Add(elapsed);
         var sort = times.Count == 0 ? now : times.Max();
-        return new PipelineItem(key, title, string.Join(" · ", bits), badge, BadgeText(badge), problem, elapsed, stages, sort);
+        return new PipelineItem(
+            key,
+            title,
+            string.Join(" · ", bits),
+            badge,
+            BadgeText(badge),
+            problem,
+            elapsed,
+            stages,
+            sort,
+            routeKind,
+            RouteIdFor(key),
+            journeys,
+            timeline,
+            appHref);
+    }
+
+    public static string RouteIdFor(string key)
+    {
+        var raw = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(key));
+        return raw.TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private static string BadgeFor(IReadOnlyList<StageMark> stages)
     {
+        if (stages[^1].State == "done")
+            return "in-plex";
         if (stages.Any(stage => stage.State == "failed"))
             return "failed";
         if (stages.Any(stage => stage.State == "stuck"))
             return "stuck";
-        if (stages[^1].State == "done")
-            return "in-plex";
         for (var i = stages.Count - 1; i >= 0; i--)
         {
             if (stages[i].State == "done")
@@ -255,12 +306,8 @@ public static class PipelineBuilder
         "failed" => "Failed",
         "stuck" => "Stuck",
         "in-plex" => "In Plex",
-        "scan" => "Scan asked",
-        "copied" => "Copied",
-        "imported" => "Imported",
-        "downloaded" => "Downloaded",
         "unknown" => "Unknown",
-        _ => "Waiting"
+        _ => "On the way"
     };
 
     private static string? ProblemFor(IReadOnlyList<StageMark> stages, DateTimeOffset now)
@@ -445,6 +492,89 @@ public static class PipelineBuilder
             return (text[..open].Trim(), year);
         return (text, null);
     }
+
+    private static string? AppHref(ArrItem arr, PipelineSources sources)
+    {
+        var link = LinkFor(arr.App, sources);
+        if (string.IsNullOrWhiteSpace(link.Url) || string.IsNullOrWhiteSpace(arr.TitleSlug) || !Rules.RemoteUrl(link.Url))
+            return null;
+        var root = link.Url.Trim().TrimEnd('/');
+        var slug = Uri.EscapeDataString(arr.TitleSlug);
+        var path = arr.Kind switch
+        {
+            "movie" => "/movie/" + slug,
+            "episode" => "/series/" + slug,
+            "album" => "/artist/" + slug,
+            _ => ""
+        };
+        return path.Length == 0 ? null : root + path;
+    }
+
+    private static List<List<ArrItem>> Clusters(IReadOnlyList<ArrItem> items)
+    {
+        var groups = new List<List<ArrItem>>();
+        foreach (var item in items)
+        {
+            var match = -1;
+            for (var i = 0; i < groups.Count; i++)
+            {
+                if (groups[i].Any(other => SameMedia(item, other)))
+                {
+                    match = i;
+                    break;
+                }
+            }
+
+            if (match < 0)
+                groups.Add([item]);
+            else
+                groups[match].Add(item);
+        }
+
+        for (var i = 0; i < groups.Count; i++)
+        {
+            for (var j = groups.Count - 1; j > i; j--)
+            {
+                if (groups[i].Any(left => groups[j].Any(right => SameMedia(left, right))))
+                {
+                    groups[i].AddRange(groups[j]);
+                    groups.RemoveAt(j);
+                }
+            }
+        }
+
+        return groups;
+    }
+
+    private static bool SameMedia(ArrItem left, ArrItem right)
+    {
+        if (!left.LibraryTag.Equals(right.LibraryTag, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (left.Kind == "episode" || right.Kind == "episode")
+        {
+            if (left.Season is int leftSeason && right.Season is int rightSeason && left.Episode is not null && right.Episode is not null)
+                return leftSeason == rightSeason && left.Episode == right.Episode && ShowKey(left).Equals(ShowKey(right), StringComparison.OrdinalIgnoreCase);
+            return left.App.Equals(right.App, StringComparison.OrdinalIgnoreCase)
+                && left.Identity.Equals(right.Identity, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrEmpty(left.ExternalId) && left.ExternalId.Equals(right.ExternalId, StringComparison.OrdinalIgnoreCase))
+            return true;
+        var (leftName, leftYear) = SplitTitle(left.Title);
+        var (rightName, rightYear) = SplitTitle(right.Title);
+        if (leftName.Length == 0 || !leftName.Equals(rightName, StringComparison.OrdinalIgnoreCase))
+            return false;
+        return leftYear is null || rightYear is null || leftYear == rightYear;
+    }
+
+    private static string ShowKey(ArrItem item)
+        => !string.IsNullOrEmpty(item.SeriesGuid) ? item.SeriesGuid : SplitTitle(item.Title).Name;
+
+    private static string RouteKind(string kind) => kind switch
+    {
+        "movie" or "episode" or "album" => kind,
+        _ => "folder"
+    };
 
     private static SourceLink LinkFor(string app, PipelineSources sources) => app switch
     {

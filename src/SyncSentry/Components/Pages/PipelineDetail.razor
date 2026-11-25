@@ -1,0 +1,127 @@
+@page "/pipeline/item/{Kind}/{Id}"
+@inject PipelineBoard Board
+@implements IDisposable
+
+<PageTitle>Pipeline · SyncSentry</PageTitle>
+
+@{
+    var item = Board.Current.Items.FirstOrDefault(candidate =>
+        candidate.Kind.Equals(Kind, StringComparison.OrdinalIgnoreCase)
+        && candidate.RouteId.Equals(Id, StringComparison.Ordinal));
+}
+
+<MudLink Href="pipeline" Class="d-inline-block mb-3">Back to the pipeline</MudLink>
+
+@if (item is null)
+{
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText>This title is not in the current window.</MudText>
+        <MudText Typo="Typo.body2" Class="muted">It may be older than the range selected on the pipeline page, or the page is still reading the logs.</MudText>
+    </MudPaper>
+}
+else
+{
+    <div class="panel-title mb-2">
+        <div style="min-width: 0">
+            <div class="kicker">@item.Kind</div>
+            <MudText Typo="Typo.h4" Class="mb-0">@item.Title</MudText>
+            <div class="change-file">@item.Subtitle</div>
+        </div>
+        <span class="status-badge @BadgeClass(item.Badge)">@item.BadgeText</span>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(item.AppHref))
+    {
+        <MudLink Href="@item.AppHref" Target="_blank" Class="d-inline-block mb-3">Open in @AppName(item)</MudLink>
+    }
+    @if (item.Journeys.Count > 0)
+    {
+        <div class="journey-list mb-4">
+            @foreach (var journey in item.Journeys)
+            {
+                <div class="journey-line @(journey.Warning && item.Badge == "in-plex" ? "journey-warn" : null)">@journey.Text</div>
+            }
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(item.Problem))
+    {
+        <MudText Typo="@(item.Badge == "in-plex" ? Typo.caption : Typo.body2)" Class="mb-3 muted">@item.Problem</MudText>
+    }
+    <MudText Typo="Typo.h6" Class="mb-1">Every event</MudText>
+    @if (item.Timeline.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Class="muted">No events in this window.</MudText>
+    }
+    else
+    {
+        @foreach (var entry in item.Timeline)
+        {
+            <div class="timeline-row">
+                <div class="timeline-when">@PipelineTime.FormatStamp(entry.When)</div>
+                <div>
+                    <div class="timeline-what">@entry.Source · @entry.Action</div>
+                    @{
+                        var detail = Detail(entry);
+                    }
+                    @if (detail.Length > 0)
+                    {
+                        <div class="muted">@detail</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(entry.Error))
+                    {
+                        <div>@entry.Error</div>
+                    }
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public string Kind { get; set; } = "";
+    [Parameter] public string Id { get; set; } = "";
+
+    private PeriodicTimer? _timer;
+
+    protected override void OnInitialized()
+    {
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        _ = Loop();
+    }
+
+    private async Task Loop()
+    {
+        try
+        {
+            while (_timer is not null && await _timer.WaitForNextTickAsync())
+                await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static string AppName(PipelineItem item) => item.Subtitle.Split('·').Select(part => part.Trim()).FirstOrDefault(part => part is "Radarr" or "Sonarr" or "Lidarr") ?? "the app";
+
+    private static string Detail(TimelineEntry entry)
+    {
+        var bits = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.Release))
+            bits.Add(entry.Release);
+        if (!string.IsNullOrWhiteSpace(entry.Quality))
+            bits.Add(entry.Quality);
+        if (entry.Bytes is > 0)
+            bits.Add(TextFormat.Bytes(entry.Bytes.Value));
+        return string.Join(" · ", bits);
+    }
+
+    private static string BadgeClass(string badge) => badge switch
+    {
+        "in-plex" => "badge-ok",
+        "failed" => "badge-error",
+        "stuck" => "badge-wait",
+        "downloaded" or "imported" or "copied" or "scan" => "badge-copy",
+        _ => "badge-unknown"
+    };
+}

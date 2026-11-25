@@ -14,6 +14,7 @@
         <div class="kicker">Pipeline</div>
         <MudText Typo="Typo.h4" Class="mb-0">On the way to Plex</MudText>
     </div>
+    <MudTextField @bind-Value="_query" Placeholder="Filter by title" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" Clearable="true" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
     <MudSelect T="int" Value="snapshot.WindowDays" ValueChanged="ChangeWindow" Label="Show" Variant="Variant.Outlined" Margin="Margin.Dense">
         <MudSelectItem T="int" Value="1">Last 1 day</MudSelectItem>
         <MudSelectItem T="int" Value="3">Last 3 days</MudSelectItem>
@@ -22,7 +23,7 @@
         <MudSelectItem T="int" Value="30">Last 30 days</MudSelectItem>
     </MudSelect>
 </div>
-<MudText Typo="Typo.body2" Class="mb-2 muted">Each new movie, episode, or album, and how far it has gotten toward Plex. This page refreshes on its own. SyncSentry only reads the push logs and the apps you connect. It does not copy files.</MudText>
+<MudText Typo="Typo.body2" Class="mb-2 muted">Each movie, episode, or album once. The lines under a title are its downloads and upgrades, from grabbed through Plex. Open a title for every event. This page refreshes on its own. SyncSentry only reads the push logs and the apps you connect. It does not copy files.</MudText>
 <MudText Typo="Typo.caption" Class="d-block mb-3 muted">@Updated(snapshot)</MudText>
 
 @foreach (var hint in snapshot.Hints)
@@ -74,38 +75,52 @@ else if (items.Count == 0)
         <MudText Typo="Typo.body2" Class="muted">Copied folders and Plex scan requests show up from the push logs even before any API keys are saved.</MudText>
     </MudPaper>
 }
+else if (Visible(items).Count == 0)
+{
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <MudText>No title matches “@_query.Trim()”.</MudText>
+    </MudPaper>
+}
 else
 {
-    @foreach (var item in items)
+    @foreach (var item in Visible(items))
     {
         <MudPaper Class="pa-4 mb-3" Elevation="0" Outlined="true">
             <div class="panel-title">
                 <div style="min-width: 0">
-                    <div class="change-title">@item.Title</div>
+                    <MudLink Href="@($"pipeline/item/{item.Kind}/{item.RouteId}")" Typo="Typo.h6">@item.Title</MudLink>
                     <div class="change-file">@item.Subtitle</div>
                 </div>
                 <span class="status-badge @BadgeClass(item.Badge)">@item.BadgeText</span>
             </div>
-            <div class="pipe" aria-label="@($"Stages for {item.Title}")">
-                @foreach (var stage in item.Stages)
-                {
-                    <div class="pipe-step pipe-@stage.State">
-                        <div class="pipe-dot"></div>
-                        <div class="pipe-name">@stage.Name</div>
-                        <div class="pipe-time">@When(stage)</div>
-                    </div>
-                }
-            </div>
+            @if (item.Journeys.Count > 0)
+            {
+                <div class="journey-list">
+                    @foreach (var journey in item.Journeys)
+                    {
+                        <div class="journey-line @(journey.Warning && item.Badge == "in-plex" ? "journey-warn" : null)">@journey.Text</div>
+                    }
+                </div>
+            }
             @if (!string.IsNullOrWhiteSpace(item.Problem))
             {
-                <MudText Typo="Typo.body2" Class="mt-3">@item.Problem</MudText>
+                <MudText Typo="@(item.Badge == "in-plex" ? Typo.caption : Typo.body2)" Class="@(item.Badge == "in-plex" ? "mt-2 muted" : "mt-3")">@item.Problem</MudText>
             }
         </MudPaper>
     }
 }
 
 @code {
+    private string _query = "";
     private PeriodicTimer? _timer;
+
+    private IReadOnlyList<PipelineItem> Visible(IReadOnlyList<PipelineItem> items)
+    {
+        var query = _query.Trim();
+        if (query.Length == 0)
+            return items;
+        return items.Where(item => item.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
 
     protected override void OnInitialized()
     {
@@ -140,21 +155,6 @@ else
         "downloaded" or "imported" or "copied" or "scan" => "badge-copy",
         _ => "badge-unknown"
     };
-
-    private static string When(StageMark stage)
-    {
-        if (stage.State == "failed")
-            return "Failed";
-        if (stage.State == "stuck")
-            return "Stuck";
-        if (stage.State == "unknown")
-            return "Unknown";
-        if (stage.At is not null)
-            return stage.At.Value.ToLocalTime().ToString("g");
-        if (!string.IsNullOrWhiteSpace(stage.Note))
-            return stage.Note;
-        return "—";
-    }
 
     private static string Updated(PipelineSnapshot snapshot)
     {
