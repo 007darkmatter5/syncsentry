@@ -228,7 +228,7 @@ public sealed class PipelineRefresher(
         ArrFetch sonarr;
         ArrFetch radarr;
         ArrFetch lidarr;
-        PlexFetch plexFetch;
+        var plexFetch = PlexFetch.NotConfigured;
         if (demo)
         {
             var demoItems = DemoPipeline.Items(now);
@@ -242,7 +242,6 @@ public sealed class PipelineRefresher(
             sonarr = await FetchArrAsync("Sonarr", setting.SonarrUrl, sonarrKey, since, cancellationToken);
             radarr = await FetchArrAsync("Radarr", setting.RadarrUrl, radarrKey, since, cancellationToken);
             lidarr = await FetchArrAsync("Lidarr", setting.LidarrUrl, lidarrKey, since, cancellationToken);
-            plexFetch = await FetchPlexAsync(setting.PlexUrl, plexToken, cancellationToken);
         }
 
         var workerPath = demo ? DemoPipeline.WorkerLog : PipelinePaths.WorkerLog;
@@ -257,6 +256,9 @@ public sealed class PipelineRefresher(
             lines.AddRange(UnasPushLog.Parse(hourly.Text));
 
         var arrItems = sonarr.Items.Concat(radarr.Items).Concat(lidarr.Items).ToList();
+        plexFetch = demo
+            ? plexFetch
+            : await FetchPlexAsync(setting.PlexUrl, plexToken, PlexMatch.From(arrItems, UnasPushLog.Fold(lines)), cancellationToken);
         var checks = DiskChecks(arrItems, lines);
         var present = await folders.PresentAsync(unasRoot, checks, cancellationToken);
         var sources = demo
@@ -287,11 +289,11 @@ public sealed class PipelineRefresher(
         return await arr.FetchAsync(app, url.Trim(), apiKey!, since, cancellationToken);
     }
 
-    private async Task<PlexFetch> FetchPlexAsync(string url, string? token, CancellationToken cancellationToken)
+    private async Task<PlexFetch> FetchPlexAsync(string url, string? token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken)
     {
         if (!Configured(url, token))
             return PlexFetch.NotConfigured;
-        return await plex.FetchAsync(url.Trim(), token!, cancellationToken);
+        return await plex.FetchAsync(url.Trim(), token!, queries, cancellationToken);
     }
 
     private string? Unprotect(string protectedValue)

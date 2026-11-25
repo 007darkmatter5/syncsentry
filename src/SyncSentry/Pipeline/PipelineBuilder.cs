@@ -84,7 +84,7 @@ public static class PipelineBuilder
         var copied = CopyOf(folder, arr.ImportedUtc, OnDisk(arr, input));
         var scanAt = ScanOf(folder, arr.ImportedUtc);
         var relative = arr.RelativeFolder.Length > 0 ? arr.RelativeFolder : copied.Relative;
-        var plex = MatchPlex(arr.LibraryTag, relative, arr.ExternalId, input.Plex);
+        var plex = MatchPlex(arr.LibraryTag, relative, arr.ExternalId, arr.SeriesGuid, arr.AlsoGuid, arr.Season, arr.Episode, input.Plex);
         var logsKnown = !input.WorkerLogMissing || !input.HourlyLogMissing;
         var stages = new List<StageMark>
         {
@@ -111,7 +111,7 @@ public static class PipelineBuilder
         var link = LinkFor(app, input.Sources);
         var copied = CopyOf(folder, null, OnDiskFolder(folder, input));
         var scanAt = folder.ScanUtc;
-        var plex = MatchPlex(folder.LibraryTag, folder.RelativeFolder, null, input.Plex);
+        var plex = MatchPlex(folder.LibraryTag, folder.RelativeFolder, null, null, null, null, null, input.Plex);
         var looked = link.Configured && link.Problem is null;
         var stages = new List<StageMark>
         {
@@ -145,11 +145,13 @@ public static class PipelineBuilder
 
     private static StageMark ImportStage(ArrItem arr, SourceLink link, DateTimeOffset now)
     {
-        if (arr.ImportedUtc is not null)
-            return new StageMark("Imported", "done", arr.ImportedUtc, null);
+        if (arr.ImportedUtc is not null || arr.HasFile)
+            return new StageMark("Imported", "done", arr.ImportedUtc, arr.ImportedUtc is null && arr.HasFile ? "Has a file" : null);
         if (!link.Configured || link.Problem is not null)
             return new StageMark("Imported", "unknown", null, null);
-        if (!arr.DownloadFailed && arr.GrabbedUtc is not null && now - arr.GrabbedUtc.Value >= PipelinePaths.StuckAfter)
+        if (arr.Dismissed || arr.DownloadSettled || arr.DownloadFailed)
+            return new StageMark("Imported", "pending", null, null);
+        if (arr.GrabbedUtc is not null && arr.InQueue == true && now - arr.GrabbedUtc.Value >= PipelinePaths.StuckAfter)
             return new StageMark("Imported", "stuck", null, null);
         return new StageMark("Imported", "pending", null, null);
     }
@@ -363,20 +365,54 @@ public static class PipelineBuilder
             && FolderKey.Matches(arr.RelativeFolder, folder.RelativeFolder));
     }
 
-    private static PlexHit? MatchPlex(string libraryTag, string relative, string? externalId, IReadOnlyList<PlexHit> hits)
+    private static PlexHit? MatchPlex(
+        string libraryTag,
+        string relative,
+        string? externalId,
+        string? seriesGuid,
+        string? alsoGuid,
+        int? season,
+        int? episode,
+        IReadOnlyList<PlexHit> hits)
     {
-        if (!string.IsNullOrEmpty(externalId))
+        if (season is int seasonNo && episode is int episodeNo)
         {
-            var byId = hits.FirstOrDefault(hit => hit.ExternalIds.Any(id => id.Equals(externalId, StringComparison.OrdinalIgnoreCase)));
-            if (byId is not null && byId.Kind != "episode" && byId.Kind != "show")
+            var byNumber = hits.FirstOrDefault(hit =>
+                hit.Kind == "episode"
+                && hit.Season == seasonNo
+                && hit.Episode == episodeNo
+                && ShowMatches(hit, seriesGuid, alsoGuid));
+            if (byNumber is not null)
+                return byNumber;
+        }
+
+        foreach (var id in new[] { externalId, seriesGuid, alsoGuid })
+        {
+            if (string.IsNullOrEmpty(id))
+                continue;
+            var byId = hits.FirstOrDefault(hit =>
+                hit.Kind is not ("episode" or "show")
+                && hit.ExternalIds.Any(candidate => candidate.Equals(id, StringComparison.OrdinalIgnoreCase)));
+            if (byId is not null)
                 return byId;
         }
 
         if (relative.Length == 0)
             return null;
         return hits.FirstOrDefault(hit =>
-            MediaLibrary.Same(hit.LibraryFolder, libraryTag)
-            && FolderKey.Matches(relative, hit.RelativeFolder));
+            hit.Kind != "show"
+            && MediaLibrary.Same(hit.LibraryFolder, libraryTag)
+            && FolderKey.Matches(relative, hit.RelativeFolder)
+            && (season is null || episode is null || hit.Season is null || (hit.Season == season && hit.Episode == episode)));
+    }
+
+    private static bool ShowMatches(PlexHit hit, string? seriesGuid, string? alsoGuid)
+    {
+        if (string.IsNullOrEmpty(seriesGuid) && string.IsNullOrEmpty(alsoGuid))
+            return true;
+        return hit.ExternalIds.Any(id =>
+            id.Equals(seriesGuid, StringComparison.OrdinalIgnoreCase)
+            || id.Equals(alsoGuid, StringComparison.OrdinalIgnoreCase));
     }
 
     private static SourceLink LinkFor(string app, PipelineSources sources) => app switch
