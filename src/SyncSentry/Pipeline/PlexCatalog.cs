@@ -10,7 +10,18 @@ public sealed record PlexHit(
     string LibraryFolder,
     string RelativeFolder,
     IReadOnlyList<string> ExternalIds,
-    DateTimeOffset? AddedUtc);
+    DateTimeOffset? AddedUtc,
+    int? Season = null,
+    int? Episode = null,
+    string? RatingKey = null);
+
+public sealed record PlexQuery(
+    string Key,
+    string LibraryTag,
+    string RelativeFolder,
+    IReadOnlyList<string> Guids,
+    int? Season,
+    int? Episode);
 
 public sealed record PlexFetch(bool Attempted, bool Ok, string? Problem, IReadOnlyList<PlexHit> Hits)
 {
@@ -21,12 +32,23 @@ public sealed record PlexFetch(bool Attempted, bool Ok, string? Problem, IReadOn
 
 public interface IPlexCatalog
 {
-    Task<PlexFetch> FetchAsync(string url, string token, CancellationToken cancellationToken);
+    Task<PlexFetch> FetchAsync(string url, string token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken);
 }
 
 public sealed class PlexCatalogClient(IHttpClientFactory http) : IPlexCatalog
 {
-    public async Task<PlexFetch> FetchAsync(string url, string token, CancellationToken cancellationToken)
+    private static readonly TimeSpan RecentTtl = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan SectionTtl = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan FoundTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan MissTtl = TimeSpan.FromMinutes(8);
+    private const int LookupBudget = 24;
+
+    private readonly object _gate = new();
+    private (string Url, DateTimeOffset Until, IReadOnlyList<PlexSection> Sections)? _sections;
+    private (string Url, DateTimeOffset Until, IReadOnlyList<PlexHit> Hits)? _recent;
+    private readonly Dictionary<string, (DateTimeOffset Until, IReadOnlyList<PlexHit> Hits)> _lookups = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<PlexFetch> FetchAsync(string url, string token, IReadOnlyList<PlexQuery> queries, CancellationToken cancellationToken)
     {
         if (!Rules.RemoteUrl(url) || string.IsNullOrWhiteSpace(token))
             return PlexFetch.NotConfigured;
@@ -34,23 +56,71 @@ public sealed class PlexCatalogClient(IHttpClientFactory http) : IPlexCatalog
         try
         {
             var client = http.CreateClient("plex");
-            var sectionsBody = await GetAsync(client, url, token, "/library/sections", cancellationToken);
-            if (sectionsBody is null)
-                return PlexFetch.Failed("refused");
-            var hits = new List<PlexHit>();
-            foreach (var section in PlexJson.Sections(sectionsBody))
+            var now = DateTimeOffset.UtcNow;
+            var sections = CachedSections(url, now);
+            if (sections is null)
             {
-                if (section.Type is not ("movie" or "show" or "artist"))
-                    continue;
-                var recent = await GetAsync(
-                    client,
-                    url,
-                    token,
-                    "/library/sections/" + Uri.EscapeDataString(section.Key) + "/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=200",
-                    cancellationToken);
-                if (recent is null)
+                var sectionsBody = await GetAsync(client, url, token, "/library/sections", cancellationToken);
+                if (sectionsBody is null)
                     return PlexFetch.Failed("refused");
-                hits.AddRange(PlexJson.Hits(recent, section.Title));
+                sections = PlexJson.Sections(sectionsBody);
+                lock (_gate)
+                    _sections = (url, now + SectionTtl, sections);
+            }
+
+            var cachedRecent = CachedRecent(url, now);
+            var hits = new List<PlexHit>();
+            if (cachedRecent is not null)
+                hits.AddRange(cachedRecent);
+            else
+            {
+                foreach (var section in sections)
+                {
+                    if (section.Type is not ("movie" or "show" or "artist"))
+                        continue;
+                    var recent = await GetAsync(
+                        client,
+                        url,
+                        token,
+                        "/library/sections/" + Uri.EscapeDataString(section.Key) + "/recentlyAdded?includeGuids=1&X-Plex-Container-Start=0&X-Plex-Container-Size=100",
+                        cancellationToken);
+                    if (recent is null)
+                        return PlexFetch.Failed("refused");
+                    hits.AddRange(PlexJson.Hits(recent, section.Title));
+                }
+
+                lock (_gate)
+                    _recent = (url, now + RecentTtl, hits.ToList());
+            }
+
+            var budget = LookupBudget;
+            foreach (var query in queries)
+            {
+                if (PlexMatch.Covers(query, hits))
+                    continue;
+                var cacheKey = PlexMatch.CacheKey(url, query);
+                if (TryCachedLookup(cacheKey, now, out var cached))
+                {
+                    hits.AddRange(cached);
+                    continue;
+                }
+
+                if (budget <= 0)
+                    continue;
+                budget--;
+                IReadOnlyList<PlexHit> found;
+                try
+                {
+                    found = await LookupAsync(client, url, token, sections, query, cancellationToken);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+                {
+                    found = [];
+                }
+
+                lock (_gate)
+                    _lookups[cacheKey] = (now + (found.Count > 0 ? FoundTtl : MissTtl), found);
+                hits.AddRange(found);
             }
 
             return new PlexFetch(true, true, null, hits);
@@ -59,6 +129,115 @@ public sealed class PlexCatalogClient(IHttpClientFactory http) : IPlexCatalog
         {
             return PlexFetch.Failed("unreachable");
         }
+    }
+
+    private async Task<IReadOnlyList<PlexHit>> LookupAsync(
+        HttpClient client,
+        string url,
+        string token,
+        IReadOnlyList<PlexSection> sections,
+        PlexQuery query,
+        CancellationToken cancellationToken)
+    {
+        var section = SectionFor(sections, query.LibraryTag);
+        if (section is null)
+            return [];
+        var guid = query.Guids.FirstOrDefault();
+        if (guid is not null)
+        {
+            var type = query.LibraryTag == "TV" ? "&type=2" : query.LibraryTag == "Music" ? "&type=9" : "";
+            var body = await GetAsync(
+                client,
+                url,
+                token,
+                "/library/sections/" + Uri.EscapeDataString(section.Key) + "/all?includeGuids=1" + type + "&guid=" + Uri.EscapeDataString(PlexMatch.GuidValue(guid)),
+                cancellationToken);
+            if (body is null)
+                return [];
+            var found = PlexJson.Hits(body, section.Title);
+            if (query.LibraryTag != "TV")
+                return found;
+            var show = found.FirstOrDefault(hit => hit.Kind == "show" && !string.IsNullOrEmpty(hit.RatingKey));
+            if (show is null)
+                return found;
+            var leaves = await GetAsync(
+                client,
+                url,
+                token,
+                "/library/metadata/" + Uri.EscapeDataString(show.RatingKey!) + "/allLeaves?includeGuids=1",
+                cancellationToken);
+            if (leaves is null)
+                return found;
+            var episodes = PlexJson.Hits(leaves, section.Title)
+                .Select(hit => hit with { ExternalIds = hit.ExternalIds.Concat(query.Guids).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() })
+                .ToList();
+            return episodes.Count > 0 ? episodes : found;
+        }
+
+        var title = query.RelativeFolder.Split('/', 2)[0];
+        if (title.Length == 0)
+            return [];
+        var leaf = query.LibraryTag == "TV" ? "4" : query.LibraryTag == "Music" ? "10" : "1";
+        var searched = await GetAsync(
+            client,
+            url,
+            token,
+            "/library/sections/" + Uri.EscapeDataString(section.Key) + "/all?includeGuids=1&type=" + leaf + "&title=" + Uri.EscapeDataString(title) + "&X-Plex-Container-Size=8",
+            cancellationToken);
+        return searched is null ? [] : PlexJson.Hits(searched, section.Title);
+    }
+
+    private IReadOnlyList<PlexSection>? CachedSections(string url, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            if (_sections is { } cached && cached.Url == url && cached.Until > now)
+                return cached.Sections;
+        }
+
+        return null;
+    }
+
+    private IReadOnlyList<PlexHit>? CachedRecent(string url, DateTimeOffset now)
+    {
+        lock (_gate)
+        {
+            if (_recent is { } cached && cached.Url == url && cached.Until > now)
+                return cached.Hits;
+        }
+
+        return null;
+    }
+
+    private bool TryCachedLookup(string key, DateTimeOffset now, out IReadOnlyList<PlexHit> hits)
+    {
+        lock (_gate)
+        {
+            if (_lookups.TryGetValue(key, out var cached) && cached.Until > now)
+            {
+                hits = cached.Hits;
+                return true;
+            }
+        }
+
+        hits = [];
+        return false;
+    }
+
+    private static PlexSection? SectionFor(IReadOnlyList<PlexSection> sections, string libraryTag)
+    {
+        var type = libraryTag switch
+        {
+            "Movies" => "movie",
+            "TV" => "show",
+            "Music" => "artist",
+            _ => ""
+        };
+        if (type.Length == 0)
+            return null;
+        var folder = MediaLibrary.Folder(libraryTag);
+        return sections.FirstOrDefault(section => section.Type.Equals(type, StringComparison.OrdinalIgnoreCase) && section.Title.Equals(folder, StringComparison.OrdinalIgnoreCase))
+            ?? sections.FirstOrDefault(section => section.Type.Equals(type, StringComparison.OrdinalIgnoreCase));
     }
 
     private static async Task<string?> GetAsync(HttpClient client, string url, string token, string path, CancellationToken cancellationToken)
@@ -125,10 +304,16 @@ public static class PlexJson
         var split = PlexPath.Split(file, sectionTitle);
         var title = TitleOf(item, type);
         var ids = ExternalIds(item);
+        var showGuid = String(item, "grandparentGuid");
+        if (showGuid.Length > 0)
+            AddGuid(ids, showGuid);
         DateTimeOffset? added = null;
         if (Prop(item, "addedAt", out var addedAt) && addedAt.TryGetInt64(out var unix) && unix > 0)
             added = DateTimeOffset.FromUnixTimeSeconds(unix);
-        return new PlexHit(title, type, split.LibraryFolder, split.RelativeFolder, ids, added);
+        var season = type == "episode" ? Int(item, "parentIndex") : null;
+        var episode = type == "episode" ? Int(item, "index") : null;
+        var rating = String(item, "ratingKey");
+        return new PlexHit(title, type, split.LibraryFolder, split.RelativeFolder, ids, added, season, episode, rating.Length == 0 ? null : rating);
     }
 
     private static string TitleOf(JsonElement item, string type)
@@ -249,3 +434,96 @@ public static class PlexJson
 }
 
 public sealed record PlexSection(string Key, string Title, string Type);
+
+public static class PlexMatch
+{
+    public static string GuidValue(string id)
+    {
+        var colon = id.IndexOf(':');
+        if (colon <= 0)
+            return id;
+        return id[..colon] + "://" + id[(colon + 1)..];
+    }
+
+    public static string? ImdbInPath(string? relative)
+    {
+        if (string.IsNullOrWhiteSpace(relative))
+            return null;
+        var match = System.Text.RegularExpressions.Regex.Match(relative, @"\btt\d{5,}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success ? "imdb:" + match.Value : null;
+    }
+
+    public static IReadOnlyList<PlexQuery> From(IReadOnlyList<ArrItem> items, IReadOnlyList<PushFolder> folders)
+    {
+        var queries = new List<PlexQuery>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            var guids = new List<string>();
+            Add(guids, item.ExternalId);
+            Add(guids, item.SeriesGuid);
+            Add(guids, item.AlsoGuid);
+            Add(guids, ImdbInPath(item.RelativeFolder));
+            var key = item.LibraryTag + "|" + (item.Season?.ToString() ?? "") + "|" + (item.Episode?.ToString() ?? "") + "|"
+                + string.Join(",", guids) + "|" + FolderKey.Normalize(item.RelativeFolder);
+            if (guids.Count == 0 && item.RelativeFolder.Length == 0)
+                continue;
+            if (seen.Add(key))
+                queries.Add(new PlexQuery(key, item.LibraryTag, item.RelativeFolder, guids, item.Season, item.Episode));
+        }
+
+        foreach (var folder in folders)
+        {
+            if (folder.RelativeFolder.Length == 0)
+                continue;
+            var imdb = ImdbInPath(folder.RelativeFolder);
+            var guids = imdb is null ? Array.Empty<string>() : new[] { imdb };
+            var key = folder.LibraryTag + "|||" + string.Join(",", guids) + "|" + FolderKey.Normalize(folder.RelativeFolder);
+            if (seen.Add(key))
+                queries.Add(new PlexQuery(key, folder.LibraryTag, folder.RelativeFolder, guids, null, null));
+        }
+
+        return queries;
+    }
+
+    public static string CacheKey(string url, PlexQuery query)
+    {
+        var show = query.LibraryTag == "TV"
+            ? query.Guids.FirstOrDefault(id => id.StartsWith("tvdb:", StringComparison.OrdinalIgnoreCase))
+                ?? query.Guids.FirstOrDefault(id => id.StartsWith("imdb:", StringComparison.OrdinalIgnoreCase))
+            : null;
+        return show is null ? url + "|" + query.Key : url + "|show|" + show;
+    }
+
+    public static bool Covers(PlexQuery query, IReadOnlyList<PlexHit> hits)
+    {
+        if (query.Season is int season && query.Episode is int episode)
+        {
+            if (hits.Any(hit => hit.Kind == "episode" && hit.Season == season && hit.Episode == episode
+                && (query.Guids.Count == 0 || hit.ExternalIds.Any(id => query.Guids.Contains(id, StringComparer.OrdinalIgnoreCase)))))
+                return true;
+        }
+
+        foreach (var guid in query.Guids)
+        {
+            if (query.LibraryTag == "TV")
+                continue;
+            if (hits.Any(hit => hit.Kind is not ("episode" or "show") && hit.ExternalIds.Any(id => id.Equals(guid, StringComparison.OrdinalIgnoreCase))))
+                return true;
+        }
+
+        if (query.RelativeFolder.Length == 0)
+            return false;
+        return hits.Any(hit =>
+            hit.Kind != "show"
+            && MediaLibrary.Same(hit.LibraryFolder, query.LibraryTag)
+            && FolderKey.Matches(query.RelativeFolder, hit.RelativeFolder)
+            && (query.Season is null || query.Episode is null || hit.Season is null || (hit.Season == query.Season && hit.Episode == query.Episode)));
+    }
+
+    private static void Add(List<string> guids, string? id)
+    {
+        if (!string.IsNullOrWhiteSpace(id) && !guids.Contains(id, StringComparer.OrdinalIgnoreCase))
+            guids.Add(id);
+    }
+}
