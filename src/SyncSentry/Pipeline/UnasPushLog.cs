@@ -38,8 +38,9 @@ public sealed record PushFolder(
 
 /// <summary>
 /// Reads the MediaManny UNAS push logs. Copy lines are per folder (a movie folder or a season folder).
-/// Any line in a run that is not an OK, a Plex scan, or the run summary is a possible failure,
-/// because the scripts do not use one fixed failure sentence.
+/// Run summaries, hourly start/done lines, "no folders changed", warnings, notes, and Plex scan
+/// lines are status. They are not items and they are not failures. A folder is failed only when a
+/// line names that folder as failed, or the run's fail count is above zero and a line names the folder.
 /// </summary>
 public static partial class UnasPushLog
 {
@@ -132,40 +133,9 @@ public static partial class UnasPushLog
                 failures.Add(line);
         }
 
-        var blame = failedCount > 0 || failures.Any(LooksLikeError);
-        if (!blame || failures.Count == 0)
-            return;
-
-        var named = failures.Where(line => line.RelativeFolder.Length > 0).ToList();
-        if (named.Count > 0)
-        {
-            foreach (var line in named)
-                Touch(map, line).NoteFailure(line);
-            return;
-        }
-
-        if (failedCount <= 0)
-            return;
-
-        var copied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var seen = new List<string>();
-        foreach (var line in run)
-        {
-            if (line.RelativeFolder.Length == 0)
-                continue;
-            var key = FolderKey.DiskKey(line.LibraryTag, line.RelativeFolder);
-            if (!seen.Contains(key, StringComparer.OrdinalIgnoreCase))
-                seen.Add(key);
-            if (line.Kind is PushLineKind.Copied or PushLineKind.AlreadySynced)
-                copied.Add(key);
-        }
-
-        var unnamed = failures[0];
-        foreach (var key in seen.Where(key => !copied.Contains(key)))
-        {
-            if (map.TryGetValue(key, out var folder))
-                folder.NoteFailure(unnamed);
-        }
+        var named = failures.Where(line => line.RelativeFolder.Length > 0 && (failedCount > 0 || NamesAFailure(line))).ToList();
+        foreach (var line in named)
+            Touch(map, line).NoteFailure(line);
     }
 
     private static MutableFolder Touch(Dictionary<string, MutableFolder> map, PushLine line)
@@ -204,6 +174,9 @@ public static partial class UnasPushLog
         if (rest.StartsWith("OK", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        if (IgnoredStatus().IsMatch(rest))
+            return false;
+
         var scan = ScanLine().Match(rest);
         if (scan.Success)
         {
@@ -221,7 +194,7 @@ public static partial class UnasPushLog
         var done = DoneLine().Match(rest);
         if (done.Success)
         {
-            var tag = MediaLibrary.Tag(done.Groups["lib"].Value);
+            var tag = done.Groups["lib"].Success ? MediaLibrary.Tag(done.Groups["lib"].Value) : "";
             var ok = int.TryParse(done.Groups["ok"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var okCount) ? okCount : 0;
             var failed = int.TryParse(done.Groups["failed"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var failedCount) ? failedCount : 0;
             line = new PushLine(stamp, PushLineKind.RunSummary, tag, MediaLibrary.Folder(tag), "", null, null, ok, failed, rest);
@@ -266,16 +239,24 @@ public static partial class UnasPushLog
         return (tag, MediaLibrary.Folder(tag), relative);
     }
 
-    private static bool LooksLikeError(PushLine line)
+    private static bool NamesAFailure(PushLine line)
     {
         var text = line.Message;
-        return text.Contains("fail", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("error", StringComparison.OrdinalIgnoreCase)
+        if (text.Contains("fail=0", StringComparison.OrdinalIgnoreCase) || text.Contains("failed=0", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!text.Contains("could not", StringComparison.OrdinalIgnoreCase)
+                && !text.Contains("denied", StringComparison.OrdinalIgnoreCase)
+                && !text.Contains("error", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return text.Contains("could not", StringComparison.OrdinalIgnoreCase)
             || text.Contains("denied", StringComparison.OrdinalIgnoreCase)
             || text.Contains("unable", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("could not", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("error", StringComparison.OrdinalIgnoreCase)
             || text.Contains("timed out", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("timeout", StringComparison.OrdinalIgnoreCase);
+            || text.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+            || Regex.IsMatch(text, @"\bfail(?:ed|ure)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 
     private static string TrimMessage(string text)
@@ -395,8 +376,11 @@ public static partial class UnasPushLog
     [GeneratedRegex(@"^PLEX scan asked \((?<count>\d+) new file(?:s|\(s\))\):\s+\[(?<lib>[^\]]+)\]\s+(?<path>.+?)(?:\s+via\s+\S+)?\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ScanLine();
 
-    [GeneratedRegex(@"^run done\s+\[(?<lib>[^\]]+)\]\s+ok=(?<ok>\d+)\s+failed=(?<failed>\d+)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?:hourly done|run done)(?:\s+\[(?<lib>[^\]]+)\])?\s+ok=(?<ok>\d+)\s+fail(?:ed)?=(?<failed>\d+)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DoneLine();
+
+    [GeneratedRegex(@"^(?:hourly start(?:\s+\[[^\]]+\])?\s*:\s*\d+\s+recently changed folder\(s\)|no\s+\[[^\]]+\]\s+folders changed\b.*|worker or hourly already running\b.*|(?:WARN|NOTE)\b.*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex IgnoredStatus();
 
     [GeneratedRegex(@"^(?<path>.+?)\s+\(\d+\s+bytes\)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex BytesSuffix();

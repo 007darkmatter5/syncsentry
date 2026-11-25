@@ -62,6 +62,10 @@ public static class PipelineBuilder
             var key = FolderKey.DiskKey(folder.LibraryTag, folder.RelativeFolder);
             if (used.Contains(key) || folder.RelativeFolder.Length == 0)
                 continue;
+            // A scan request, a run summary, or an already-in-sync note is not its own item.
+            // It only fills a stage on a movie, episode, album, or a folder that was copied or failed.
+            if (folder.CopiedUtc is null && !folder.Failed)
+                continue;
             items.Add(FromFolder(folder, input));
         }
 
@@ -88,7 +92,7 @@ public static class PipelineBuilder
             ImportStage(arr, link, input.Now),
             CopyStage(copied, arr.ImportedUtc, input.Now, logsKnown),
             ScanStage(scanAt, logsKnown),
-            PlexStage(plex, copied, input)
+            PlexStage(plex, input)
         };
         return Finish(
             arr.App + "|" + arr.Identity,
@@ -115,7 +119,7 @@ public static class PipelineBuilder
             new("Imported", looked ? "pending" : "unknown", null, null),
             CopyStage(copied, null, input.Now, logsKnown: true),
             ScanStage(scanAt, logsKnown: true),
-            PlexStage(plex, copied, input)
+            PlexStage(plex, input)
         };
         return Finish(
             "log|" + FolderKey.DiskKey(folder.LibraryTag, folder.RelativeFolder),
@@ -172,16 +176,13 @@ public static class PipelineBuilder
         return new StageMark("Scan asked", "pending", null, null);
     }
 
-    private static StageMark PlexStage(PlexHit? hit, CopyInfo copied, PipelineInput input)
+    private static StageMark PlexStage(PlexHit? hit, PipelineInput input)
     {
         var link = input.Sources.Plex;
         if (!link.Configured || link.Problem is not null)
             return new StageMark("In Plex", "unknown", null, null);
         if (hit is not null)
             return new StageMark("In Plex", "done", hit.AddedUtc, null);
-        var started = copied.At ?? copied.FailureUtc;
-        if (copied.Reached && started is not null && input.Now - started.Value >= PipelinePaths.StuckAfter)
-            return new StageMark("In Plex", "stuck", null, null);
         return new StageMark("In Plex", "pending", null, null);
     }
 

@@ -71,6 +71,8 @@ public static class IoCommands
             {
                 Console.WriteLine("no");
             }
+
+            Console.Out.Flush();
         }
 
         return 0;
